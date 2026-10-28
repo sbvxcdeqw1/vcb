@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from ..models import CAPREPAIR, CHARGE, PAYMENT, PENALTY, SERVICES, Account, Entry
+from ..models import CAPREPAIR, CHARGE, OPENING, PAYMENT, PENALTY, SERVICES, Account, Entry
 from ..money import D
 
 CAPREPAIR_RE = re.compile(r"капитальн|капремонт|кап\.\s*ремонт", re.I)
@@ -76,6 +76,7 @@ def parse_card(path: str | Path, rows: list[list] | None = None) -> Account:
     rows = rows if rows is not None else _rows(path)
     acc = Account(source=path.name)
     head = None
+    prev_running = None
     for i, row in enumerate(rows):
         cells = [str(c).strip() for c in row if c not in (None, "")]
         if not cells:
@@ -96,7 +97,22 @@ def parse_card(path: str | Path, rows: list[list] | None = None) -> Account:
             continue
         d = _date(row[head["дата"]])
         if d is None:
-            continue  # «Сальдо», «Обороты» и пр.
+            label = str(row[0] or "")
+            m = re.match(r"Сальдо на (\d{2}\.\d{2}\.\d{4})", label)
+            bal = _num(row[head["задолженность"]]) if "задолженность" in head else None
+            if m and bal is not None:
+                if acc.saldo_start is None:
+                    acc.saldo_start, acc.saldo_start_date = bal, datetime.strptime(m.group(1), "%d.%m.%Y").date()
+                else:
+                    acc.saldo_end = bal
+            continue  # «Обороты» и пр.
+        running = _num(row[head["задолженность"]]) if "задолженность" in head else None
+        if running is not None and acc.saldo_start is not None:
+            prev = prev_running if prev_running is not None else acc.saldo_start
+            delta = (_num(row[head["начислено"]]) or 0) - (_num(row[head["оплата"]]) or 0)
+            if abs(prev + delta - running) > D("0.005"):
+                acc.warnings.append(f"{d:%d.%m.%Y}: бегущее сальдо {running} не сходится с {prev + delta}")
+            prev_running = running
         registrar = str(row[head["регистратор"]] or "")
         oper = str(row[head.get("операция", head["регистратор"])] or "")
         charged = _num(row[head["начислено"]]) if "начислено" in head else None
@@ -115,4 +131,10 @@ def parse_card(path: str | Path, rows: list[list] | None = None) -> Account:
         acc.entries.append(Entry(d, kind, cat, oper.strip(), amount, registrar.strip()))
     if head is None:
         raise ParseError(f"{path.name}: не найдена таблица с колонками Дата/Регистратор/Операция")
+    if acc.saldo_start and acc.saldo_start > 0:
+        # начальное сальдо карточки включает и пени - разбить его по карточке нельзя
+        acc.entries.append(Entry(acc.saldo_start_date - timedelta(days=1), OPENING, SERVICES,
+                                 f"Сальдо на {acc.saldo_start_date:%d.%m.%Y}", acc.saldo_start))
+        acc.warnings.append(f"сальдо на {acc.saldo_start_date:%d.%m.%Y} ({acc.saldo_start}) в карточке не разбито на "
+                            f"долг и пени - принято целиком за долг только для очередности погашения")
     return acc

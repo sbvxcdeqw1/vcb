@@ -66,3 +66,23 @@ def test_chess_parse_and_full_debt_matches_closing_balance():
     lines = build_charge_lines(acc.entries, as_of=date(2026, 7, 31))  # вся история, с начальным остатком
     assert total_debt(lines) == Decimal("79793.41")  # «Конечный остаток» образца
     assert sum(e.amount for e in acc.entries if e.kind == OPENING) == Decimal("5859.31")
+
+
+CARD98 = Path(__file__).parent.parent / "examples" / "karta_kv98.xls"
+
+
+@pytest.mark.skipif(not (CHESS.exists() and CARD98.exists()), reason="нет примеров кв. 98")
+def test_card_vs_chess_reconciliation():
+    from vcb.parsers.onec import parse_any
+    from vcb.reconcile import compare, reconciled
+
+    card, chess = parse_any(CARD98), parse_any(CHESS)
+    assert card.saldo_start == Decimal("6060.19") and card.saldo_end == Decimal("162748.26")
+    rep = compare(card, chess)
+    # «Итог:» начального остатка в образце шахматки (6 935,03) - сальдо карточки с пенями на 31.05.2020
+    assert rep.card_balance_start == Decimal("6935.03")
+    assert rep.opening_diff == Decimal("1075.72")
+    assert rep.principal_gap == Decimal("11269.54")  # в шахматке нет части услуг
+    merged = reconciled(card, chess)
+    by = lambda acc, k: sum(e.amount for e in acc.entries if e.kind == k and e.date >= date(2020, 6, 1))
+    assert by(merged, "charge") == by(card, "charge") and by(merged, "payment") == by(card, "payment")

@@ -37,6 +37,9 @@ class Account:
     entries: list[Entry] = field(default_factory=list)
     source: str = ""
     warnings: list[str] = field(default_factory=list)
+    saldo_start: Decimal | None = None  # «Сальдо на …» из карточки (услуги + пени вместе)
+    saldo_start_date: date | None = None
+    saldo_end: Decimal | None = None
 
 
 @dataclass

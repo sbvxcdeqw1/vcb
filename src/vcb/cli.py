@@ -14,7 +14,38 @@ from .pipeline import build_case, safe, write_case
 from .profiles import choose_profile, load_profile
 
 
+def check(argv):
+    """vcb check КАРТОЧКА ШАХМАТКА [--merge ИТОГ.xlsx]: сверка выгрузок и шахматка, приведённая к карточке."""
+    from .docs.checkerboard import write_checkerboard
+    from .docs.context import Case
+    from .models import Debtor, Party
+    from .parsers.onec import parse_any
+    from .reconcile import compare, format_report, reconciled
+
+    ap = argparse.ArgumentParser(prog="vcb check")
+    ap.add_argument("card"), ap.add_argument("chess")
+    ap.add_argument("--merge", help="сохранить шахматку, дополненную строкой «не распределено по услугам»")
+    a = ap.parse_args(argv)
+    card, chess = parse_any(a.card), parse_any(a.chess)
+    for w in card.warnings + chess.warnings:
+        print("! ", w)
+    print(format_report(compare(card, chess)))
+    if a.merge:
+        acc = reconciled(card, chess)
+        case = Case(acc, Debtor(), Party(), Party(), date.today(), date.today(), max(e.date for e in acc.entries))
+        write_checkerboard(a.merge, case)
+        print(f"\nШахматка со строкой «не распределено» сохранена: {a.merge}")
+    return 0
+
+
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "check":
+        return check(argv[1:])
+    return run(argv)
+
+
+def run(argv):
     ap = argparse.ArgumentParser(prog="vcb", description="Заявления в суд и карточки расчёта по ЖКУ из выгрузок 1С")
     ap.add_argument("input", help="выгрузка 1С (xls/xlsx) или папка с выгрузками (пакетный режим)")
     ap.add_argument("-o", "--out", default="out", help="папка результата")
