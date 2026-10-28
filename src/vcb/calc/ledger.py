@@ -71,7 +71,7 @@ def build_charge_lines(entries: list[Entry], *, as_of: date, due_day: int = 10, 
         lines.append(ln)
     lines.sort(key=lambda c: (c.due, c.accrued))
     by_month = {(ln.year, ln.month): ln for ln in lines if not ln.opening}
-    first_month = min(by_month, default=None)
+    first_month, last_month = min(by_month, default=None), max(by_month, default=None)
     events = sorted([("c", ln.accrued, ln) for ln in lines] +
                     [("p", e.date, (abs(e.amount), e.ref, e.period)) for e in credits],
                     key=lambda x: (x[1], 0 if x[0] == "c" else 1))
@@ -106,9 +106,9 @@ def build_charge_lines(entries: list[Entry], *, as_of: date, due_day: int = 10, 
                 return Decimal(0)
             if ln is not None:
                 amount = take_from(ln, amount, when, ref)
-            elif first_month and target < first_month:
+            elif first_month and (target < first_month or target > last_month):
                 if ignored is not None:
-                    ignored.append((ref, amount, "относится к периоду до начала расчёта"))
+                    ignored.append((ref, amount, "относится к периоду вне расчёта"))
                 return Decimal(0)
         return pay_oldest(amount, when, ref)
 

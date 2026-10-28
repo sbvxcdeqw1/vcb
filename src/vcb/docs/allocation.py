@@ -44,6 +44,8 @@ def write_allocation(path, case: Case, res):
         where = "; ".join(f"{lbl}: {fmt(a)}" for lbl, a in parts)
         if p.ref in skipped:
             where = f"не учтена: {skipped[p.ref]}"
+        elif not where:
+            where = "не учтена: вне расчётного периода"
         put(ws, f"H{r}", where if p.include else "—", border=True, align=LEFT)
         put(ws, f"I{r}", "; ".join(p.flags), border=True, align=LEFT)
         put(ws, f"J{r}", p.info[:300], border=True, align=LEFT)

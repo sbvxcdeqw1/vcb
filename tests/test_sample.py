@@ -140,3 +140,16 @@ def test_payment_for_not_yet_accrued_month_waits_for_accrual():
                E(date(2025, 2, 10), PAYMENT, "100", "П1", (2025, 2))]  # оплата за февраль до его начисления
     lines = build_charge_lines(entries, as_of=date(2025, 3, 1))
     assert [ln.debt for ln in lines] == [Decimal(100), Decimal(0)]
+
+
+def test_period_is_strictly_operator_defined():
+    from vcb.models import CHARGE, PAYMENT, Entry
+    from vcb.pipeline import _in_period
+
+    E = lambda d, k, per=None: Entry(d, k, SERVICES, "x", Decimal(1), period=per)
+    a, b = date(2024, 6, 1), date(2025, 5, 31)
+    assert _in_period(E(date(2024, 6, 30), CHARGE), a, b) and not _in_period(E(date(2024, 5, 31), CHARGE), a, b)
+    assert not _in_period(E(date(2025, 6, 30), CHARGE), a, b)
+    assert _in_period(E(date(2025, 8, 1), PAYMENT, (2025, 5)), a, b)  # за май 2025, оплачено позже
+    assert not _in_period(E(date(2025, 1, 1), PAYMENT, (2024, 5)), a, b)  # за период до начала
+    assert not _in_period(E(date(2024, 5, 1), PAYMENT), a, b) and _in_period(E(date(2024, 7, 1), PAYMENT), a, b)

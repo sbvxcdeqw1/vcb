@@ -28,6 +28,25 @@ def safe(s: str) -> str:
     return re.sub(r"[^\w\-. ]+", "_", s).strip() or "debtor"
 
 
+def _to_date(v) -> date | None:
+    v = str(v or "").strip()
+    if not v:
+        return None
+    return date.fromisoformat(v) if "-" in v else date(int(v[6:10]), int(v[3:5]), int(v[0:2]))
+
+
+def _in_period(e: Entry, p_from: date, p_to: date) -> bool:
+    """Расчёт строго по периоду оператора: начисления - только периода; оплата - если её месяц (из назначения)
+    в периоде, а без назначения - если поступила не раньше начала периода."""
+    if e.kind == PAYMENT:
+        if e.period:
+            return (p_from.year, p_from.month) <= e.period <= (p_to.year, p_to.month)
+        return e.date >= p_from
+    if e.kind == CHARGE:
+        return p_from <= e.date <= p_to
+    return False
+
+
 def _min_due(as_of: date, years) -> date | None:
     if not years:
         return None
@@ -59,8 +78,12 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     if not charges:
         raise ValueError("в выгрузке нет начислений")
     first = min(e.date for e in charges)
-    p_from = period[0] or date(first.year, first.month, 1)
-    p_to = period[1] or max(e.date for e in charges)
+    row = row or {}
+    p_from = period[0] or _to_date(row.get("period_from")) or date(first.year, first.month, 1)
+    p_to = period[1] or _to_date(row.get("period_to")) or max(e.date for e in charges)
+    if p_from > p_to:
+        raise ValueError(f"расчётный период задан неверно: {p_from:%d.%m.%Y} – {p_to:%d.%m.%Y}")
+    case_period = (p_from, p_to)
     rules, rates = rules_from(cfg)
     rate = rates.at(as_of)
     claim = cfg.get("claim", {})
@@ -76,7 +99,7 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     by_purpose = cfg.get("payments", {}).get("allocation", "purpose") == "purpose"
     kw = dict(as_of=as_of, p_from=p_from, p_to=p_to, min_due=min_due, rules=rules, rates=rates)
     for cat in (SERVICES, CAPREPAIR):
-        entries = [e for e in acc.entries if e.category == cat]
+        entries = [e for e in acc.entries if e.category == cat and _in_period(e, p_from, p_to)]
         if not any(e.kind == CHARGE for e in entries):
             continue
         ignored: list = []
@@ -97,7 +120,8 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
         if pay_variants and cat == SERVICES:
             for name, pay_entries, purpose in pay_variants:
                 base = [e for e in entries if e.kind != PAYMENT]
-                _, ln2, it2 = _calc(base + pay_entries, by_purpose=purpose, **kw)
+                _, ln2, it2 = _calc(base + [e for e in pay_entries if _in_period(e, p_from, p_to)],
+                                    by_purpose=purpose, **kw)
                 case.scenarios.append((name, total_debt(ln2), total_penalty(it2)))
     legal = profile.get("legal") or {}
     case.legal_costs = D(legal.get("costs", 0))
@@ -159,8 +183,6 @@ def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, a
             case.notes.append(f"оплаты «{KIND_TITLES[kind]}»: {len(sub)} шт. на {fmt_money(tot)} руб. — {decided}"
                               + ("; нужно ваше решение (payments.third_party_policy / --payment-overrides)"
                                  if any(p.flags for p in sub) else ""))
-    if any(p.date < start for p in pays):
-        case.notes.append(f"оплаты реестра до {start:%d.%m.%Y} не учитываются (они в начальном остатке)")
     # сценарии для сравнения
     resident = [p for p in in_range if p.kind not in (ENFORCEMENT,)]
     only_res = [p for p in in_range if p.kind == "resident"]
