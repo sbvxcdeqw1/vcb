@@ -45,9 +45,9 @@ def debtor_from_account(acc: Account, default_city: str = "") -> Debtor:
     parts = [p.strip() for p in acc.address.split(",") if p.strip()]
     d = Debtor(fio=acc.owner, account=acc.number, city=default_city)
     if parts:
-        m = re.match(r"(.+?)\s+г$", parts[0])
+        m = re.match(r"(.+?)\s+г$", parts[0]) or re.match(r"г\.?\s*(.+)$", parts[0])
         if m:
-            d.city = m.group(1)
+            d.city = m.group(1).strip().capitalize() if m.group(1).isupper() else m.group(1).strip()
             parts = parts[1:]
     if parts:
         d.street = parts[0]

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from vcb.calc.ledger import build_charge_lines, total_debt
+from vcb.calc.ledger import build_charge_lines, select_lines, total_debt
 from vcb.calc.penalty import PenaltyRules, RateTable, calc_penalty, total_penalty
 from vcb.models import SERVICES
 from vcb.parsers.onec import parse_card
@@ -19,7 +19,7 @@ def test_kv24_matches_sample():
     assert acc.number == "00-0000000024"
     entries = [e for e in acc.entries if e.category == SERVICES]
     as_of = date(2026, 4, 13)
-    lines = build_charge_lines(entries, period_from=date(2024, 6, 1), as_of=as_of)
+    lines = select_lines(build_charge_lines(entries, as_of=as_of), period_from=date(2024, 6, 1))
     assert total_debt(lines) == Decimal("24805.47")
     items = calc_penalty(lines, as_of, PenaltyRules(), RateTable(Decimal("9.5")))
     assert total_penalty(items) == Decimal("4351.96")
@@ -33,7 +33,7 @@ def test_statutory_mode_and_payments():
     entries = [E(date(2025, 1, 31), CHARGE, "1000"), E(date(2025, 2, 28), CHARGE, "1000"),
                E(date(2025, 4, 1), PAYMENT, "1500")]
     as_of = date(2025, 6, 30)
-    lines = build_charge_lines(entries, period_from=date(2025, 1, 1), as_of=as_of)
+    lines = select_lines(build_charge_lines(entries, as_of=as_of), period_from=date(2025, 1, 1))
     assert lines[0].debt == 0 and lines[1].debt == Decimal("500")
     assert total_debt(lines) == Decimal("500.00")
     items = calc_penalty(lines, as_of, PenaltyRules(mode="statutory"), RateTable(Decimal("10")))
@@ -51,3 +51,18 @@ def test_court_lookup():
         {"city": "Пермь", "streets": [{"street": "ул. Кировоградская", "houses": "100-200"}]}])])
     assert reg.find(Debtor(city="Пермь", street="Кировоградская", house="180"), "magistrate").name == "Участок 1"
     assert reg.find(Debtor(city="Пермь", street="Кировоградская", house="20"), "magistrate") is None
+
+
+CHESS = Path(__file__).parent.parent / "examples" / "shakhmatka_kv98.xlsx"
+
+
+@pytest.mark.skipif(not CHESS.exists(), reason="нет примера шахматки")
+def test_chess_parse_and_full_debt_matches_closing_balance():
+    from vcb.models import OPENING
+    from vcb.parsers.onec import parse_any
+
+    acc = parse_any(CHESS)
+    assert acc.number == "551010009822" and not acc.warnings
+    lines = build_charge_lines(acc.entries, as_of=date(2026, 7, 31))  # вся история, с начальным остатком
+    assert total_debt(lines) == Decimal("79793.41")  # «Конечный остаток» образца
+    assert sum(e.amount for e in acc.entries if e.kind == OPENING) == Decimal("5859.31")

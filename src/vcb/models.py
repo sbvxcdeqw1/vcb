@@ -12,7 +12,7 @@ CATEGORY_TITLES = {
     CAPREPAIR: "взносы на капитальный ремонт",
 }
 
-CHARGE, PAYMENT, PENALTY = "charge", "payment", "penalty"
+CHARGE, PAYMENT, PENALTY, OPENING = "charge", "payment", "penalty", "opening"
 
 
 @dataclass
@@ -36,6 +36,7 @@ class Account:
     address: str = ""
     entries: list[Entry] = field(default_factory=list)
     source: str = ""
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass

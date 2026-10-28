@@ -62,9 +62,18 @@ def classify_category(*texts: str) -> str:
     return CAPREPAIR if CAPREPAIR_RE.search(" ".join(texts)) else SERVICES
 
 
-def parse_card(path: str | Path) -> Account:
+def parse_any(path: str | Path) -> Account:
+    """«Шахматка» (по услугам) или «Карточка расчетов» - определяем по содержимому."""
+    from .chess import is_chess, parse_chess
+
     path = Path(path)
     rows = _rows(path)
+    return parse_chess(path, rows) if is_chess(rows) else parse_card(path, rows)
+
+
+def parse_card(path: str | Path, rows: list[list] | None = None) -> Account:
+    path = Path(path)
+    rows = rows if rows is not None else _rows(path)
     acc = Account(source=path.name)
     head = None
     for i, row in enumerate(rows):

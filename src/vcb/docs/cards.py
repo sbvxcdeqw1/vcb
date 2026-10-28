@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from openpyxl import Workbook
 
-from ..models import CATEGORY_TITLES, CAPREPAIR, CHARGE, PAYMENT
+from ..models import CATEGORY_TITLES, CAPREPAIR, CHARGE, OPENING, PAYMENT
 from .context import Case, CategoryResult
 from .xlsx_util import *
 
@@ -36,12 +36,12 @@ def write_debt_card(path, case: Case, res: CategoryResult):
         put(ws, f"{col}13", t, bold=True, border=True, align=CENTER)
     r = 14
     for e in sorted(res.entries, key=lambda e: e.date):
-        if not (case.period_from <= e.date <= case.as_of):
+        if e.kind != OPENING and not (case.period_from <= e.date <= case.as_of):
             continue
         put(ws, f"A{r}", e.date, border=True, fmt="DD.MM.YYYY")
         put(ws, f"B{r}", e.registrar, border=True, align=LEFT)
         put(ws, f"C{r}", e.purpose, border=True, align=LEFT)
-        put(ws, f"D{r}", e.amount if e.kind == CHARGE else None, border=True, fmt=MONEY)
+        put(ws, f"D{r}", e.amount if e.kind in (CHARGE, OPENING) else None, border=True, fmt=MONEY)
         put(ws, f"E{r}", e.amount if e.kind == PAYMENT else None, border=True, fmt=MONEY)
         r += 1
     put(ws, f"A{r}", "Обороты за период", bold=True, border=True)

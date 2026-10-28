@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from .calc.ledger import build_charge_lines, total_debt
+from .calc.ledger import build_charge_lines, select_lines, total_debt
 from .calc.penalty import calc_penalty, total_penalty
 from .config import rules_from
 from .court.fee import state_fee
@@ -16,9 +16,9 @@ from .docs.cards import write_debt_card, write_penalty_card
 from .docs.checkerboard import write_checkerboard
 from .docs.claim import write_claim
 from .docs.context import Case, CategoryResult
-from .models import CAPREPAIR, CHARGE, SERVICES, Debtor, Party
-from .money import D, q
-from .parsers.onec import parse_card
+from .models import CAPREPAIR, CHARGE, OPENING, PAYMENT, SERVICES, Debtor, Party
+from .money import D, fmt as fmt_money, q
+from .parsers.onec import parse_any
 
 NAMES = {SERVICES: "ЖКУ", CAPREPAIR: "капремонт"}
 
@@ -29,7 +29,7 @@ def safe(s: str) -> str:
 
 def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: date,
                registry: CourtRegistry | None, period: tuple[date | None, date | None] = (None, None)) -> Case:
-    acc = parse_card(card_path)
+    acc = parse_any(card_path)
     debtor = debtor_from_row(row) if row else Debtor()
     auto = debtor_from_account(acc, default_city=(registry.default_city if registry else ""))
     for f in ("fio", "city", "street", "house", "flat", "account"):  # пустое в реестре - берём из шапки выгрузки
@@ -38,19 +38,41 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     charges = [e for e in acc.entries if e.kind == CHARGE and e.amount > 0]
     if not charges:
         raise ValueError("в выгрузке нет начислений")
-    p_from = period[0] or date(min(e.date for e in charges).year, min(e.date for e in charges).month, 1)
+    first = min(e.date for e in charges)
+    p_from = period[0] or date(first.year, first.month, 1)
     p_to = period[1] or max(e.date for e in charges)
     rules, rates = rules_from(cfg)
     rate = rates.at(as_of)
+    claim = cfg.get("claim", {})
+    incl_open = bool(claim.get("include_opening"))
+    min_due = None
+    if claim.get("limitation_years"):
+        n = int(claim["limitation_years"])
+        try:
+            min_due = as_of.replace(year=as_of.year - n)
+        except ValueError:  # 29 февраля
+            min_due = as_of.replace(year=as_of.year - n, day=28)
     case = Case(acc, debtor, profile["claimant"], profile["representative"], p_from, p_to, as_of)
+    case.notes += acc.warnings
+    opening_total = sum((e.amount for e in acc.entries if e.kind == OPENING), Decimal(0))
+    if opening_total and not incl_open:
+        case.notes.append(f"начальный остаток {fmt_money(opening_total)} руб. не включён в расчёт "
+                          f"(claim.include_opening: false)")
     for cat in (SERVICES, CAPREPAIR):
         entries = [e for e in acc.entries if e.category == cat]
         if not any(e.kind == CHARGE for e in entries):
             continue
-        lines = build_charge_lines(entries, period_from=p_from, period_to=p_to, as_of=as_of, due_day=rules.due_day)
+        all_lines = build_charge_lines(entries, as_of=as_of, due_day=rules.due_day)
+        lines = select_lines(all_lines, period_from=p_from, period_to=p_to, min_due=min_due, include_opening=incl_open)
+        dropped = [ln for ln in all_lines if not ln.opening and p_from <= ln.accrued <= p_to and ln not in lines
+                   and ln.debt > 0]
+        if dropped:
+            case.notes.append(f"{NAMES[cat]}: за сроком давности исключено {len(dropped)} начислений, "
+                              f"{fmt_money(sum((ln.debt for ln in dropped), Decimal(0)))} руб. долга (срок платежа до "
+                              f"{min_due:%d.%m.%Y})")
         items = calc_penalty(lines, as_of, rules, rates)
-        case.results[cat] = CategoryResult(cat, [e for e in entries if e.kind in (CHARGE, "payment")], lines, items,
-                                           total_debt(lines), total_penalty(items), rate)
+        shown = [e for e in entries if e.kind in (CHARGE, PAYMENT) or (e.kind == OPENING and incl_open)]
+        case.results[cat] = CategoryResult(cat, shown, lines, items, total_debt(lines), total_penalty(items), rate)
     legal = profile.get("legal") or {}
     case.legal_costs = D(legal.get("costs", 0))
     case.legal_executor, case.legal_contract = legal.get("executor", ""), legal.get("contract", "")

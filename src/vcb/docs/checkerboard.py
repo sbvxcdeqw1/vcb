@@ -1,93 +1,128 @@
-"""Шахматка: начисления и оплаты по назначению платежа, месяцы по горизонтали, лист на каждый год."""
+"""Шахматка по образцу 1С: услуги по строкам, месяцы по столбцам (Начислено / Оплата), остатки.
+
+Лист «Шахматка» - весь период; затем лист на каждый год (остаток на начало года - в «Начальном остатке»).
+Оплаты показываются отрицательными, столбец «Оплата» выводится только в месяцах, где были оплаты.
+"""
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
+from datetime import date
 from decimal import Decimal
 
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter as L
 
-from ..models import CATEGORY_TITLES, CHARGE, PAYMENT, PENALTY
+from ..models import CHARGE, OPENING, PAYMENT
 from .context import Case
 from .xlsx_util import *
 
-MONTHS = ["Янв", "Фев", "Мар", "Апр", "Май", "Июн", "Июл", "Авг", "Сен", "Окт", "Ноя", "Дек"]
-KINDS = [(CHARGE, "Начислено"), (PAYMENT, "Оплачено"), (PENALTY, "Пени (по данным 1С)")]
+MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
+          "Декабрь"]
+ZERO = Decimal(0)
 
 
 def write_checkerboard(path, case: Case):
-    entries = [e for e in case.account.entries if e.date <= case.as_of]
+    entries = [e for e in case.account.entries if e.kind in (CHARGE, PAYMENT, OPENING) and e.date <= case.as_of]
     if not entries:
         return
-    cells = defaultdict(Decimal)  # (год, категория, назначение, вид, месяц) -> сумма
-    for e in entries:
-        cells[(e.date.year, e.category, e.purpose, e.kind, e.date.month)] += e.amount
-    years = sorted({k[0] for k in cells})
+    services = list(OrderedDict.fromkeys(e.purpose for e in entries))
+    first = min(e.date for e in entries if e.kind != OPENING) if any(e.kind != OPENING for e in entries) else None
+    last = max(e.date for e in entries)
     wb = Workbook()
-    summary = wb.active
-    summary.title = "Итого по годам"
-    for y in years:
-        _year_sheet(wb.create_sheet(str(y)), case, cells, y)
-    _summary(summary, case, cells, years)
-    for _ws in wb.worksheets:
-        printable(_ws, landscape=True)
+    ws = wb.active
+    ws.title = "Шахматка"
+    _grid(ws, case, entries, services, (first.year, first.month), (last.year, last.month))
+    for y in range(first.year, last.year + 1):
+        sheet = wb.create_sheet(str(y))
+        _grid(sheet, case, entries, services, (y, 1 if y > first.year else first.month),
+              (y, 12 if y < last.year else last.month))
+    for w in wb.worksheets:
+        printable(w, landscape=True)
     wb.save(path)
 
 
-def _year_sheet(ws, case, cells, year):
-    put(ws, "A1", f"Шахматка начислений и оплат за {year} г. — {case.debtor.fio or case.account.owner}", bold=True)
-    put(ws, "A2", f"Лицевой счёт {case.account.number}, {case.debtor.address or case.account.address}")
-    hdr = ["Назначение платежа", "Вид"] + MONTHS + ["Итого за год"]
-    for i, t in enumerate(hdr, 1):
-        put(ws, f"{ws.cell(4, i).coordinate}", t, bold=True, border=True, align=CENTER)
-    r = 5
-    rows_by_kind = defaultdict(list)
-    keys = sorted({(k[1], k[2], k[3]) for k in cells if k[0] == year})
-    for cat, purpose, kind in keys:
-        label = dict(KINDS)[kind]
-        put(ws, f"A{r}", f"{purpose} [{CATEGORY_TITLES[cat].split(',')[0]}]", border=True, align=LEFT)
-        put(ws, f"B{r}", label, border=True)
-        for m in range(1, 13):
-            v = cells.get((year, cat, purpose, kind, m))
-            put(ws, ws.cell(r, 2 + m).coordinate, v, border=True, fmt=MONEY)
-        put(ws, ws.cell(r, 15).coordinate, f"=SUM(C{r}:N{r})", bold=True, border=True, fmt=MONEY)
-        rows_by_kind[kind].append(r)
-        r += 1
-    r += 1
-    for kind, label in KINDS:
-        if not rows_by_kind[kind]:
-            continue
-        put(ws, f"A{r}", f"ИТОГО {label.lower()}", bold=True, border=True)
-        put(ws, f"B{r}", None, border=True)
-        for col in range(3, 16):
-            L = ws.cell(4, col).column_letter
-            f = "+".join(f"{L}{x}" for x in rows_by_kind[kind])
-            put(ws, ws.cell(r, col).coordinate, f"={f}", bold=True, border=True, fmt=MONEY)
-        rows_by_kind[kind + "_total"] = r
-        r += 1
-    if rows_by_kind.get(CHARGE + "_total") and rows_by_kind.get(PAYMENT + "_total"):
-        a, b = rows_by_kind[CHARGE + "_total"], rows_by_kind[PAYMENT + "_total"]
-        put(ws, f"A{r}", "Разница (начислено − оплачено)", bold=True, border=True)
-        put(ws, f"B{r}", None, border=True)
-        for col in range(3, 16):
-            L = ws.cell(4, col).column_letter
-            put(ws, ws.cell(r, col).coordinate, f"={L}{a}-{L}{b}", bold=True, border=True, fmt=MONEY)
-    widths(ws, {"A": 46, "B": 20, **{ws.cell(1, c).column_letter: 11 for c in range(3, 15)}, "O": 14})
-    ws.freeze_panes = "C5"
+def _grid(ws, case, entries, services, start: tuple[int, int], end: tuple[int, int]):
+    start_d = date(*start, 1)
+    months = []
+    y, m = start
+    while (y, m) <= end:
+        months.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    # суммы
+    ch, pay = defaultdict(Decimal), defaultdict(Decimal)
+    opening = defaultdict(Decimal)
+    for e in entries:
+        if e.date < start_d:  # всё, что было до листа, уходит в начальный остаток
+            opening[e.purpose] += -e.amount if e.kind == PAYMENT else e.amount
+        elif e.kind == OPENING:
+            opening[e.purpose] += e.amount
+        elif e.kind == PAYMENT:
+            pay[(e.purpose, e.date.year, e.date.month)] += e.amount
+        else:
+            ch[(e.purpose, e.date.year, e.date.month)] += e.amount
+    has_pay = {(y, m) for (_, y, m) in pay}
 
+    put(ws, "A2", "Шахматка", bold=True)
+    put(ws, "A3", f"за период {MONTHS[months[0][1] - 1]} {months[0][0]} г. - {MONTHS[months[-1][1] - 1]} "
+                  f"{months[-1][0]} г.")
+    put(ws, "A4", f"{case.account.number}")
+    put(ws, "A5", case.debtor.address or case.account.address)
+    if case.debtor.fio or case.account.owner:
+        put(ws, "A6", case.debtor.fio or case.account.owner)
+    top, sub = 8, 9
+    merges = []
+    put(ws, f"A{top}", "Услуга", bold=True, border=True, align=CENTER)
+    merges.append(dict(start_row=top, start_column=1, end_row=sub, end_column=2))
+    put(ws, f"C{top}", "Начальный остаток", bold=True, border=True, align=CENTER)
+    merges.append(dict(start_row=top, start_column=3, end_row=sub, end_column=3))
+    col = 4
+    colmap = {}  # (y, m, "c"/"p") -> номер столбца
+    for ym in months:
+        title = f"{MONTHS[ym[1] - 1]} {ym[0]}"
+        span = 2 if ym in has_pay else 1
+        put(ws, f"{L(col)}{top}", title, bold=True, border=True, align=CENTER)
+        if span == 2:
+            merges.append(dict(start_row=top, start_column=col, end_row=top, end_column=col + 1))
+            put(ws, f"{L(col + 1)}{top}", None, border=True)
+        put(ws, f"{L(col)}{sub}", "Начислено", bold=True, border=True, align=CENTER)
+        colmap[(*ym, "c")] = col
+        if span == 2:
+            put(ws, f"{L(col + 1)}{sub}", "Оплата", bold=True, border=True, align=CENTER)
+            colmap[(*ym, "p")] = col + 1
+        col += span
+    tot_c, tot_p, close = col, col + 1, col + 3
+    put(ws, f"{L(tot_c)}{top}", "Итог", bold=True, border=True, align=CENTER)
+    merges.append(dict(start_row=top, start_column=tot_c, end_row=top, end_column=tot_p))
+    put(ws, f"{L(tot_p)}{top}", None, border=True)
+    put(ws, f"{L(tot_c)}{sub}", "Начислено", bold=True, border=True, align=CENTER)
+    put(ws, f"{L(tot_p)}{sub}", "Оплата", bold=True, border=True, align=CENTER)
+    put(ws, f"{L(close)}{top}", "Конечный остаток", bold=True, border=True, align=CENTER)
+    merges.append(dict(start_row=top, start_column=close, end_row=sub, end_column=close))
 
-def _summary(ws, case, cells, years):
-    put(ws, "A1", f"Итого по годам — {case.debtor.fio or case.account.owner}, ЛС {case.account.number}", bold=True)
-    for i, t in enumerate(["Назначение платежа", "Вид"] + [str(y) for y in years] + ["Всего"], 1):
-        put(ws, ws.cell(3, i).coordinate, t, bold=True, border=True, align=CENTER)
-    keys = sorted({(k[1], k[2], k[3]) for k in cells})
-    r = 4
-    for cat, purpose, kind in keys:
-        put(ws, f"A{r}", f"{purpose} [{CATEGORY_TITLES[cat].split(',')[0]}]", border=True, align=LEFT)
-        put(ws, f"B{r}", dict(KINDS)[kind], border=True)
-        for j, y in enumerate(years):
-            tot = sum((v for k, v in cells.items() if k[:4] == (y, cat, purpose, kind)), Decimal(0))
-            put(ws, ws.cell(r, 3 + j).coordinate, tot or None, border=True, fmt=MONEY)
-        last = ws.cell(r, 3 + len(years) - 1).column_letter
-        put(ws, ws.cell(r, 3 + len(years)).coordinate, f"=SUM(C{r}:{last}{r})", bold=True, border=True, fmt=MONEY)
-        r += 1
-    widths(ws, {"A": 46, "B": 20, **{ws.cell(1, 3 + j).column_letter: 14 for j in range(len(years) + 1)}})
+    r0 = sub + 1
+    for i, svc in enumerate(services):
+        r = r0 + i
+        put(ws, f"A{r}", svc, border=True, align=LEFT)
+        merges.append(dict(start_row=r, start_column=1, end_row=r, end_column=2))
+        put(ws, f"C{r}", opening.get(svc) or None, border=True, fmt=MONEY)
+        for ym in months:
+            c = colmap[(*ym, "c")]
+            put(ws, f"{L(c)}{r}", ch.get((svc, *ym)) or None, border=True, fmt=MONEY)
+            if (*ym, "p") in colmap:
+                p = pay.get((svc, *ym))
+                put(ws, f"{L(colmap[(*ym, 'p')])}{r}", -p if p else None, border=True, fmt=MONEY)
+        c_cols = [L(colmap[(*ym, "c")]) for ym in months]
+        p_cols = [L(colmap[(*ym, "p")]) for ym in months if (*ym, "p") in colmap]
+        put(ws, f"{L(tot_c)}{r}", "=" + "+".join(f"{c}{r}" for c in c_cols), border=True, fmt=MONEY)
+        put(ws, f"{L(tot_p)}{r}", ("=" + "+".join(f"{c}{r}" for c in p_cols)) if p_cols else 0, border=True,
+            fmt=MONEY)
+        put(ws, f"{L(close)}{r}", f"=C{r}+{L(tot_c)}{r}+{L(tot_p)}{r}", border=True, fmt=MONEY)
+    rt = r0 + len(services)
+    put(ws, f"A{rt}", "Итог:", bold=True, border=True)
+    merges.append(dict(start_row=rt, start_column=1, end_row=rt, end_column=2))
+    for c in [3] + [v for v in colmap.values()] + [tot_c, tot_p, close]:
+        put(ws, f"{L(c)}{rt}", f"=SUM({L(c)}{r0}:{L(c)}{rt - 1})", bold=True, border=True, fmt=MONEY)
+    widths(ws, {"A": 30, "B": 2, "C": 14, **{L(c): 12 for c in range(4, close + 1)}})
+    for mg in merges:
+        ws.merge_cells(**mg)
+    ws.freeze_panes = ws.cell(sub + 1, 4)
