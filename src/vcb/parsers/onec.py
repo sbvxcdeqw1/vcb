@@ -99,9 +99,9 @@ def parse_card(path: str | Path, rows: list[list] | None = None) -> Account:
         if d is None:
             label = str(row[0] or "")
             m = re.match(r"Сальдо на (\d{2}\.\d{2}\.\d{4})", label)
-            bal = _num(row[head["задолженность"]]) if "задолженность" in head else None
-            if m and bal is not None:
-                if acc.saldo_start is None:
+            if m:
+                bal = (_num(row[head["задолженность"]]) if "задолженность" in head else None) or D(0)
+                if acc.saldo_start_date is None:  # первая строка «Сальдо» - начало периода (пустая = 0)
                     acc.saldo_start, acc.saldo_start_date = bal, datetime.strptime(m.group(1), "%d.%m.%Y").date()
                 else:
                     acc.saldo_end = bal

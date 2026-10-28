@@ -153,3 +153,38 @@ def test_period_is_strictly_operator_defined():
     assert _in_period(E(date(2025, 8, 1), PAYMENT, (2025, 5)), a, b)  # за май 2025, оплачено позже
     assert not _in_period(E(date(2025, 1, 1), PAYMENT, (2024, 5)), a, b)  # за период до начала
     assert not _in_period(E(date(2024, 5, 1), PAYMENT), a, b) and _in_period(E(date(2024, 7, 1), PAYMENT), a, b)
+
+
+def test_real_perm_register_matches_sample_court():
+    from vcb.court.registry import CourtRegistry
+    from vcb.models import Debtor
+
+    reg = CourtRegistry.load("perm_krai")
+    d = Debtor(city="Пермь", street="Кировоградская", house="180", flat="24")
+    ms = reg.find(d, "magistrate")
+    assert ms and "№ 6 Кировского района" in ms.name  # дом 180 входит в участок № 6 (ранее - № 2)
+    dc = reg.find(d, "district")
+    assert dc.name == "Кировский районный суд г. Перми" and dc.address == "614113, г. Пермь, ул. Кировоградская, д. 37"
+    # населённый пункт без разобранных улиц - по тексту описания границ
+    assert reg.find(Debtor(city="Александровск", street="Ленина", house="5"), "district").name.startswith("Александровский")
+
+
+def test_rate_cap_and_history():
+    from vcb.config import load_config, rules_from
+
+    rules, rates = rules_from(load_config())
+    assert rates.at(date(2026, 4, 13)) == Decimal("9.5")  # ключевая выше, но действует потолок 9,5%
+    assert rates.at(date(2021, 6, 1)) == Decimal("5.00")  # до потолка - фактическая ставка ЦБ
+    assert len(rules.moratoria) == 2
+
+
+@pytest.mark.skipif(not SAMPLE.exists(), reason="нет примера выгрузки")
+def test_full_pipeline_reproduces_sample_with_default_config():
+    from vcb.config import load_config
+    from vcb.models import Party
+    from vcb.pipeline import build_case
+
+    prof = {"claimant": Party(), "representative": Party(), "legal": {}}
+    c = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
+    res = c.results[SERVICES]
+    assert (res.debt, res.penalty) == (Decimal("24805.47"), Decimal("4351.96"))

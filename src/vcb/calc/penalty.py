@@ -27,13 +27,20 @@ class RateTable:
 
     default: Decimal = Decimal("9.5")
     history: list[tuple[date, Decimal]] = field(default_factory=list)  # (действует с, ставка)
+    cap: Decimal | None = None  # потолок ставки для пени за ЖКУ (в образцах заказчика - 9,5%)
+    cap_from: date | None = None
+    cap_to: date | None = None
 
     def at(self, d: date) -> Decimal:
         rate = None
         for since, r in sorted(self.history):
             if since <= d:
                 rate = r
-        return self.default if rate is None else rate
+        rate = self.default if rate is None else rate
+        if self.cap is not None and (self.cap_from is None or d >= self.cap_from) and (
+                self.cap_to is None or d <= self.cap_to):
+            rate = min(rate, self.cap)
+        return rate
 
 
 @dataclass

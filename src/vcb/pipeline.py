@@ -146,6 +146,8 @@ def _choose_court(case: Case, cfg: dict, registry: CourtRegistry | None):
     case.court_level = level
     case.fee = state_fee(price, cfg, level=level, order=(kind == "order"))
     court = registry.find(case.debtor, level) if registry else None
+    if registry:
+        case.notes += registry.notes
     if court:
         case.court_name, case.court_address = court.name, court.address
     else:

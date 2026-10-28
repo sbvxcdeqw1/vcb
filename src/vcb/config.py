@@ -38,8 +38,13 @@ def rules_from(cfg: dict) -> tuple[PenaltyRules, RateTable]:
                          due_day=p["due_day"], include_payment_day=p["include_payment_day"],
                          moratoria=[(_d(a), _d(b)) for a, b in p.get("moratoria") or []])
     rates = RateTable(default=D(p["key_rate"]))
+    cap = p.get("rate_cap")
+    if cap:
+        rates.cap, rates.cap_from, rates.cap_to = D(cap["value"]), _d(cap.get("from")) if cap.get("from") else None, \
+            _d(cap.get("to")) if cap.get("to") else None
     if p.get("key_rates_file"):
-        for line in Path(p["key_rates_file"]).read_text(encoding="utf-8").splitlines():
+        f = Path(p["key_rates_file"])
+        for line in (f if f.is_absolute() else DATA.parent / f).read_text(encoding="utf-8").splitlines():
             if line.strip() and not line.lower().startswith("дата"):
                 d, r = line.replace(",", ".").split(";")[:2]
                 rates.history.append((date.fromisoformat(d.strip()), Decimal(r.strip())))
