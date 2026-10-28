@@ -135,6 +135,4 @@ def parse_card(path: str | Path, rows: list[list] | None = None) -> Account:
         # начальное сальдо карточки включает и пени - разбить его по карточке нельзя
         acc.entries.append(Entry(acc.saldo_start_date - timedelta(days=1), OPENING, SERVICES,
                                  f"Сальдо на {acc.saldo_start_date:%d.%m.%Y}", acc.saldo_start))
-        acc.warnings.append(f"сальдо на {acc.saldo_start_date:%d.%m.%Y} ({acc.saldo_start}) в карточке не разбито на "
-                            f"долг и пени - принято целиком за долг только для очередности погашения")
     return acc

@@ -13,6 +13,7 @@ from .xlsx_util import *
 
 
 def write_allocation(path, case: Case, res):
+    skipped = {ref: why for ref, _, why in getattr(res, "ignored", [])}
     refs = defaultdict(list)  # ref -> [(начисление, сумма)]
     paid_by = defaultdict(list)  # id строки -> [(оплата, сумма)]
     for ln in res.all_lines:
@@ -24,7 +25,7 @@ def write_allocation(path, case: Case, res):
     ws = wb.active
     ws.title = "Оплаты"
     put(ws, "A1", f"Разноска оплат — {case.debtor.fio or case.account.owner}, ЛС {case.account.number}", bold=True)
-    put(ws, "A2", "Оплаты зачитываются на самые ранние начисления независимо от периода в назначении платежа; "
+    put(ws, "A2", "Оплата идёт на период из назначения платежа, остаток и оплаты без периода — на самые ранние долги; "
                   "платежи по исполнительному производству в зачёт не берутся.")
     heads = ["№", "Дата", "Сумма", "Тип платежа", "Зачтено", "Основание", "Период по назначению", "Разнесено на",
              "Примечание", "Назначение платежа"]
@@ -40,8 +41,10 @@ def write_allocation(path, case: Case, res):
         put(ws, f"E{r}", "да" if p.include else "нет", bold=not p.include, border=True)
         put(ws, f"F{r}", p.reason, border=True, align=LEFT)
         put(ws, f"G{r}", f"{p.period_hint[1]:02d}.{p.period_hint[0]}" if p.period_hint else "", border=True)
-        put(ws, f"H{r}", "; ".join(f"{lbl}: {fmt(a)}" for lbl, a in parts) if p.include else "—", border=True,
-            align=LEFT)
+        where = "; ".join(f"{lbl}: {fmt(a)}" for lbl, a in parts)
+        if p.ref in skipped:
+            where = f"не учтена: {skipped[p.ref]}"
+        put(ws, f"H{r}", where if p.include else "—", border=True, align=LEFT)
         put(ws, f"I{r}", "; ".join(p.flags), border=True, align=LEFT)
         put(ws, f"J{r}", p.info[:300], border=True, align=LEFT)
         r += 1

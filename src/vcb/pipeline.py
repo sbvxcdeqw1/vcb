@@ -37,10 +37,11 @@ def _min_due(as_of: date, years) -> date | None:
         return as_of.replace(year=as_of.year - int(years), day=28)
 
 
-def _calc(entries, *, as_of, p_from, p_to, min_due, incl_open, rules, rates):
+def _calc(entries, *, as_of, p_from, p_to, min_due, rules, rates, by_purpose=True, ignored=None):
     """Долг и пени по одной категории при данном наборе проводок. Возвращает (все строки, строки заявления, пени)."""
-    all_lines = build_charge_lines(entries, as_of=as_of, due_day=rules.due_day)
-    lines = select_lines(all_lines, period_from=p_from, period_to=p_to, min_due=min_due, include_opening=incl_open)
+    all_lines = build_charge_lines(entries, as_of=as_of, due_day=rules.due_day, by_purpose=by_purpose,
+                                   ignored=ignored)
+    lines = select_lines(all_lines, period_from=p_from, period_to=p_to, min_due=min_due)
     items = calc_penalty(lines, as_of, rules, rates)
     return all_lines, lines, items
 
@@ -63,37 +64,40 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     rules, rates = rules_from(cfg)
     rate = rates.at(as_of)
     claim = cfg.get("claim", {})
-    incl_open = bool(claim.get("include_opening"))
     min_due = _min_due(as_of, claim.get("limitation_years"))
     case = Case(acc, debtor, profile["claimant"], profile["representative"], p_from, p_to, as_of)
     case.notes += acc.warnings
     opening_total = sum((e.amount for e in acc.entries if e.kind == OPENING), Decimal(0))
-    if opening_total and not incl_open:
-        case.notes.append(f"начальный остаток {fmt_money(opening_total)} руб. не включён в расчёт "
-                          f"(claim.include_opening: false)")
+    if opening_total:
+        case.notes.append(f"сальдо на начало ({fmt_money(opening_total)} руб.) в расчёт не входит")
     pay_variants = None
     if payments_path:
         pay_variants = _apply_register(case, acc, cfg, payments_path, overrides_path, as_of)
-    kw = dict(as_of=as_of, p_from=p_from, p_to=p_to, min_due=min_due, incl_open=incl_open, rules=rules, rates=rates)
+    by_purpose = cfg.get("payments", {}).get("allocation", "purpose") == "purpose"
+    kw = dict(as_of=as_of, p_from=p_from, p_to=p_to, min_due=min_due, rules=rules, rates=rates)
     for cat in (SERVICES, CAPREPAIR):
         entries = [e for e in acc.entries if e.category == cat]
         if not any(e.kind == CHARGE for e in entries):
             continue
-        all_lines, lines, items = _calc(entries, **kw)
+        ignored: list = []
+        all_lines, lines, items = _calc(entries, by_purpose=by_purpose, ignored=ignored, **kw)
         dropped = [ln for ln in all_lines if not ln.opening and p_from <= ln.accrued <= p_to and ln not in lines
                    and ln.debt > 0]
         if dropped:
             case.notes.append(f"{NAMES[cat]}: за сроком давности исключено {len(dropped)} начислений, "
                               f"{fmt_money(sum((ln.debt for ln in dropped), Decimal(0)))} руб. долга (срок платежа до "
                               f"{min_due:%d.%m.%Y})")
-        shown = [e for e in entries if e.kind in (CHARGE, PAYMENT) or (e.kind == OPENING and incl_open)]
+        shown = [e for e in entries if e.kind in (CHARGE, PAYMENT) or False]
         res = CategoryResult(cat, shown, lines, items, total_debt(lines), total_penalty(items), rate)
-        res.all_lines = all_lines
+        res.all_lines, res.ignored = all_lines, ignored
+        if ignored:
+            case.notes.append(f"{len(ignored)} оплат(ы) на {fmt_money(sum((a for _, a, _ in ignored), Decimal(0)))} руб. "
+                              f"отнесены к периодам до начала расчёта и не учтены")
         case.results[cat] = res
         if pay_variants and cat == SERVICES:
-            for name, pay_entries in pay_variants:
+            for name, pay_entries, purpose in pay_variants:
                 base = [e for e in entries if e.kind != PAYMENT]
-                _, ln2, it2 = _calc(base + pay_entries, **kw)
+                _, ln2, it2 = _calc(base + pay_entries, by_purpose=purpose, **kw)
                 case.scenarios.append((name, total_debt(ln2), total_penalty(it2)))
     legal = profile.get("legal") or {}
     case.legal_costs = D(legal.get("costs", 0))
@@ -144,7 +148,8 @@ def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, a
     if card_paid and abs(card_paid - reg_total) > Decimal("0.005"):
         case.notes.append(f"оплаты реестра ({fmt_money(reg_total)}) не равны оплатам выгрузки 1С "
                           f"({fmt_money(card_paid)}) за тот же период")
-    mk = lambda ps: [Entry(p.date, PAYMENT, SERVICES, "Оплата (реестр)", p.amount, p.reason, ref=p.ref) for p in ps]
+    mk = lambda ps: [Entry(p.date, PAYMENT, SERVICES, "Оплата (реестр)", p.amount, p.reason, ref=p.ref,
+                           period=p.period_hint) for p in ps]
     acc.entries = [e for e in acc.entries if e.kind != PAYMENT] + mk([p for p in in_range if p.include])
     for kind in (ENFORCEMENT, THIRD_PARTY):
         sub = [p for p in in_range if p.kind == kind]
@@ -159,9 +164,12 @@ def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, a
     # сценарии для сравнения
     resident = [p for p in in_range if p.kind not in (ENFORCEMENT,)]
     only_res = [p for p in in_range if p.kind == "resident"]
-    return [("Все платежи реестра", mk(in_range)),
-            ("Без исполнительного производства", mk(resident)),
-            ("Только оплаты от плательщика", mk(only_res))]
+    purpose = cfg.get("payments", {}).get("allocation", "purpose") == "purpose"
+    return [("Все платежи реестра", mk(in_range), purpose),
+            ("Без исполнительного производства", mk(resident), purpose),
+            ("Только оплаты от плательщика", mk(only_res), purpose),
+            ("Все платежи, без учёта периода в назначении (на самые ранние)", mk(in_range), False),
+            ("Только оплаты от плательщика, на самые ранние", mk(only_res), False)]
 
 
 def write_case(case: Case, out_dir: Path) -> list[Path]:

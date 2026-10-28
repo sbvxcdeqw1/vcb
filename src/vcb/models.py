@@ -26,6 +26,7 @@ class Entry:
     amount: Decimal  # начисление/оплата; перерасчёт может быть отрицательным
     registrar: str = ""
     ref: str = ""  # идентификатор оплаты для отчёта о разноске
+    period: tuple[int, int] | None = None  # (год, месяц), на который плательщик направил оплату
 
 
 @dataclass

@@ -63,7 +63,7 @@ def test_chess_parse_and_full_debt_matches_closing_balance():
 
     acc = parse_any(CHESS)
     assert acc.number == "551010009822" and not acc.warnings
-    lines = build_charge_lines(acc.entries, as_of=date(2026, 7, 31))  # вся история, с начальным остатком
+    lines = build_charge_lines(acc.entries, as_of=date(2026, 7, 31), with_opening=True)  # с начальным остатком
     assert total_debt(lines) == Decimal("79793.41")  # «Конечный остаток» образца
     assert sum(e.amount for e in acc.entries if e.kind == OPENING) == Decimal("5859.31")
 
@@ -114,3 +114,29 @@ def test_payments_go_to_oldest_charges_regardless_of_period_in_purpose():
     lines = build_charge_lines(entries, as_of=date(2025, 5, 1))
     assert [ln.debt for ln in lines] == [Decimal(0), Decimal(50), Decimal(100)]
     assert {p.ref for ln in lines for p in ln.portions if p.closed} == {"П1"}
+
+
+def test_payment_goes_to_period_from_purpose_and_unmatched_to_oldest():
+    from vcb.models import CHARGE, PAYMENT, Entry
+
+    E = lambda d, k, a, ref="", per=None: Entry(d, k, SERVICES, "x", Decimal(a), ref=ref, period=per)
+    base = [E(date(2025, 1, 31), CHARGE, "100"), E(date(2025, 2, 28), CHARGE, "100"), E(date(2025, 3, 31), CHARGE, "100")]
+    ignored = []
+    pays = [E(date(2025, 4, 15), PAYMENT, "130", "П1", (2025, 3)),   # март 100 + остаток 30 на январь
+            E(date(2025, 4, 16), PAYMENT, "40", "П2", (2024, 12))]   # период до начала расчёта - не учитывается
+    lines = build_charge_lines(base + pays, as_of=date(2025, 5, 1), ignored=ignored)
+    assert [ln.debt for ln in lines] == [Decimal(70), Decimal(100), Decimal(0)]
+    assert [i[0] for i in ignored] == ["П2"]
+    # режим «на самые ранние»: период в назначении игнорируется
+    lines = build_charge_lines(base + pays[:1], as_of=date(2025, 5, 1), by_purpose=False)
+    assert [ln.debt for ln in lines] == [Decimal(0), Decimal(70), Decimal(100)]
+
+
+def test_payment_for_not_yet_accrued_month_waits_for_accrual():
+    from vcb.models import CHARGE, PAYMENT, Entry
+
+    E = lambda d, k, a, ref="", per=None: Entry(d, k, SERVICES, "x", Decimal(a), ref=ref, period=per)
+    entries = [E(date(2025, 1, 31), CHARGE, "100"), E(date(2025, 2, 28), CHARGE, "100"),
+               E(date(2025, 2, 10), PAYMENT, "100", "П1", (2025, 2))]  # оплата за февраль до его начисления
+    lines = build_charge_lines(entries, as_of=date(2025, 3, 1))
+    assert [ln.debt for ln in lines] == [Decimal(100), Decimal(0)]

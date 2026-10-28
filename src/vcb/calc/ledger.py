@@ -45,68 +45,101 @@ def due_date(year: int, month: int, due_day: int) -> date:
     return date(y, m, due_day)
 
 
-def build_charge_lines(entries: list[Entry], *, as_of: date, due_day: int = 10) -> list[ChargeLine]:
-    """Все начисления (и начальный остаток) + FIFO-распределение оплат и отрицательных перерасчётов.
+def build_charge_lines(entries: list[Entry], *, as_of: date, due_day: int = 10, with_opening: bool = False,
+                       by_purpose: bool = True, ignored: list | None = None) -> list[ChargeLine]:
+    """Месячные начисления + распределение оплат.
 
-    Оплаты гасят самое старое начисление (ст. 319.1 ГК РФ), поэтому FIFO идёт по всей истории; отбор строк
-    в заявление - отдельно, `select_lines`."""
-    charges = [e for e in entries if e.date <= as_of and (
-        (e.kind == CHARGE and e.amount > 0) or (e.kind == OPENING and e.amount > 0))]
+    * Начисления за месяц (в т.ч. по нескольким услугам) складываются в одну строку.
+    * Оплата с указанным периодом (`Entry.period`) гасит начисление этого периода (`by_purpose`); остаток и оплаты
+      без периода идут на самые ранние долги (ст. 319.1 ГК РФ). Оплата за период до начала расчёта в расчёт
+      не входит (попадает в `ignored`), оплата за ещё не начисленный месяц ждёт начисления.
+    * Начальный остаток в расчёт не входит (`with_opening=True` - только для сверок)."""
+    kinds = (CHARGE, OPENING) if with_opening else (CHARGE,)
+    grouped: dict[tuple, Decimal] = {}
+    last_date: dict[tuple, date] = {}
+    for e in entries:
+        if e.date <= as_of and e.kind in kinds and e.amount > 0:
+            key = (e.kind == OPENING, e.date.year, e.date.month)
+            grouped[key] = grouped.get(key, Decimal(0)) + e.amount
+            last_date[key] = max(last_date.get(key, e.date), e.date)
     credits = [e for e in entries if e.date <= as_of and (
-        e.kind == PAYMENT or (e.kind in (CHARGE, OPENING) and e.amount < 0))]
+        e.kind == PAYMENT or (e.kind in kinds and e.amount < 0))]
     lines = []
-    for e in charges:
-        ln = ChargeLine(e.date.year, e.date.month, e.date, due_date(e.date.year, e.date.month, due_day), e.amount,
-                        opening=(e.kind == OPENING))
+    for (is_open, y, m), amount in grouped.items():
+        ln = ChargeLine(y, m, last_date[(is_open, y, m)], due_date(y, m, due_day), amount, opening=is_open)
         ln.portions = [Portion(ln.amount)]
         lines.append(ln)
     lines.sort(key=lambda c: (c.due, c.accrued))
-    events = sorted([("c", ln.accrued, ln) for ln in lines] + [("p", e.date, (abs(e.amount), e.ref)) for e in credits],
+    by_month = {(ln.year, ln.month): ln for ln in lines if not ln.opening}
+    first_month = min(by_month, default=None)
+    events = sorted([("c", ln.accrued, ln) for ln in lines] +
+                    [("p", e.date, (abs(e.amount), e.ref, e.period)) for e in credits],
                     key=lambda x: (x[1], 0 if x[0] == "c" else 1))
     open_lines: list[ChargeLine] = []
-    advance: list[tuple[Decimal, str]] = []  # оплаты, поступившие раньше начисления
+    advance: list[tuple[Decimal, str]] = []  # оплаты без периода, поступившие раньше начислений
+    pending: dict[tuple, list[tuple[Decimal, str]]] = {}  # оплаты за ещё не начисленный месяц
 
-    def apply(amount: Decimal, when: date, ref: str = "") -> Decimal:
+    def take_from(ln: ChargeLine, amount: Decimal, when: date, ref: str) -> Decimal:
+        tail = ln.portions[-1]
+        if tail.closed is not None or amount <= 0:
+            return amount
+        take = min(amount, tail.amount)
+        if take < tail.amount:
+            tail.amount -= take
+            ln.portions.insert(len(ln.portions) - 1, Portion(take, when, ref))
+        else:
+            tail.closed, tail.ref = when, ref
+        return amount - take
+
+    def pay_oldest(amount: Decimal, when: date, ref: str) -> Decimal:
         for ln in open_lines:
             if amount <= 0:
                 break
-            tail = ln.portions[-1]
-            if tail.closed is not None:
-                continue
-            take = min(amount, tail.amount)
-            amount -= take
-            if take < tail.amount:
-                tail.amount -= take
-                ln.portions.insert(len(ln.portions) - 1, Portion(take, when, ref))
-            else:
-                tail.closed, tail.ref = when, ref
+            amount = take_from(ln, amount, when, ref)
         return amount
+
+    def pay(amount: Decimal, when: date, ref: str, target) -> Decimal:
+        if target and by_purpose:
+            ln = by_month.get(target)
+            if ln is not None and ln.accrued > when:
+                pending.setdefault(target, []).append((amount, ref))
+                return Decimal(0)
+            if ln is not None:
+                amount = take_from(ln, amount, when, ref)
+            elif first_month and target < first_month:
+                if ignored is not None:
+                    ignored.append((ref, amount, "относится к периоду до начала расчёта"))
+                return Decimal(0)
+        return pay_oldest(amount, when, ref)
 
     for kind, when, payload in events:
         if kind == "c":
             open_lines.append(payload)
-            advance[:] = [(rest, ref) for amt, ref in advance if (rest := apply(amt, when, ref)) > 0]
+            key = (payload.year, payload.month)
+            for amt, ref in pending.pop(key, []):
+                rest = take_from(payload, amt, when, ref)
+                if rest > 0 and (rest := pay_oldest(rest, when, ref)) > 0:
+                    advance.append((rest, ref))
+            advance[:] = [(rest, ref) for amt, ref in advance if (rest := pay_oldest(amt, when, ref)) > 0]
         else:
-            amt, ref = payload
-            if (rest := apply(amt, when, ref)) > 0:
+            amt, ref, target = payload
+            if (rest := pay(amt, when, ref, target)) > 0:
                 advance.append((rest, ref))
         open_lines[:] = [ln for ln in open_lines if ln.debt > 0]
     return lines
 
 
 def select_lines(lines: list[ChargeLine], *, period_from: date | None = None, period_to: date | None = None,
-                 min_due: date | None = None, include_opening: bool = False) -> list[ChargeLine]:
-    """Строки для заявления: период, срок давности (по сроку платежа), начальный остаток - по решению."""
+                 min_due: date | None = None) -> list[ChargeLine]:
+    """Строки для заявления: период и срок давности (по сроку платежа). Начальный остаток не входит никогда."""
     out = []
     for ln in lines:
         if ln.opening:
-            if not include_opening:
-                continue
-        else:
-            if period_from and ln.accrued < period_from:
-                continue
-            if period_to and ln.accrued > period_to:
-                continue
+            continue
+        if period_from and ln.accrued < period_from:
+            continue
+        if period_to and ln.accrued > period_to:
+            continue
         if min_due and ln.due < min_due:
             continue
         out.append(ln)

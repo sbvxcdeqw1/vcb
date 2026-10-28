@@ -19,6 +19,7 @@ class CategoryResult:
     debt: Decimal
     penalty: Decimal
     rate: Decimal
+    ignored: list = field(default_factory=list)  # оплаты вне периода расчёта: (ref, сумма, причина)
     all_lines: list = field(default_factory=list)  # включая начальный остаток и периоды вне заявления
 
     @property
