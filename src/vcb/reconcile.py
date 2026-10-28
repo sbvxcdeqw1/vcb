@@ -75,7 +75,7 @@ def compare(card: Account, chess: Account) -> Report:
         # сальдо карточки на 1-е число первого месяца шахматки (оно включает и пени)
         bal = card.saldo_start
         for e in card.entries:
-            if e.date < date(lo[0], lo[1], 1):
+            if e.date < date(lo[0], lo[1], 1) and e.kind != OPENING:
                 bal += e.amount if e.kind in (CHARGE, "penalty") and not _is_pen_payment(e) else -e.amount
         r.card_balance_start = bal
     if r.chess_gap_months:
