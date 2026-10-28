@@ -98,11 +98,11 @@ def test_payment_classification_and_overrides(tmp_path):
           mk(3, date(2025, 6, 5), "978.63", "(991-0501-1540121500-244,л/с02991018855,225) ПД за 01.22")]
     classify(ps, load_config())
     assert [p.kind for p in ps] == [ENFORCEMENT, RESIDENT, THIRD_PARTY]
-    assert [p.include for p in ps] == [False, True, True] and ps[2].flags  # бюджетный плательщик - ждёт решения
+    assert [p.include for p in ps] == [False, True, True] and not ps[2].flags  # третье лицо зачитывается
     ov = tmp_path / "ov.csv"
     ov.write_text("дата;сумма;решение;комментарий\n05.06.2025;978.63;исключить;ИП\n", encoding="utf-8")
     apply_overrides(ps, ov)
-    assert ps[2].include is False and not any(f.startswith("нужно") for f in ps[2].flags)
+    assert ps[2].include is False
 
 
 def test_payments_go_to_oldest_charges_regardless_of_period_in_purpose():

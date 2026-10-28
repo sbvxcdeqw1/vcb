@@ -49,4 +49,4 @@ payments:
   third_party_patterns:        # платёж бюджетной организации (КБК / лицевой счёт казначейства) - неоднозначно
     - 'л/с\s*0\d{10}'
     - '\d{3}-\d{4}-\d{10}-\d{3}'
-  third_party_policy: ask      # include - зачитывать, exclude - не зачитывать, ask - зачитывать, но пометить
+  third_party_policy: include  # include - зачитывать (принято), exclude - не зачитывать, ask - зачитывать с пометкой
