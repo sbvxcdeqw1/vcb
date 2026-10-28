@@ -86,3 +86,31 @@ def test_card_vs_chess_reconciliation():
     merged = reconciled(card, chess)
     by = lambda acc, k: sum(e.amount for e in acc.entries if e.kind == k and e.date >= date(2020, 6, 1))
     assert by(merged, "charge") == by(card, "charge") and by(merged, "payment") == by(card, "payment")
+
+
+def test_payment_classification_and_overrides(tmp_path):
+    from vcb.config import load_config
+    from vcb.parsers.payments import ENFORCEMENT, RESIDENT, THIRD_PARTY, Payment, apply_overrides, classify
+
+    mk = lambda i, d, a, t: Payment(f"П{i}", d, Decimal(a), t)
+    ps = [mk(1, date(2019, 6, 24), "0.62", "Погашение долга Судебный приказ N2-1968/19 от 16.04.2019, 37522/19/59003-ИП"),
+          mk(2, date(2020, 1, 20), "3000", "551010009822 12.2019-12.2019 к/плата=3000.00"),
+          mk(3, date(2025, 6, 5), "978.63", "(991-0501-1540121500-244,л/с02991018855,225) ПД за 01.22")]
+    classify(ps, load_config())
+    assert [p.kind for p in ps] == [ENFORCEMENT, RESIDENT, THIRD_PARTY]
+    assert [p.include for p in ps] == [False, True, True] and ps[2].flags  # бюджетный плательщик - ждёт решения
+    ov = tmp_path / "ov.csv"
+    ov.write_text("дата;сумма;решение;комментарий\n05.06.2025;978.63;исключить;ИП\n", encoding="utf-8")
+    apply_overrides(ps, ov)
+    assert ps[2].include is False and not any(f.startswith("нужно") for f in ps[2].flags)
+
+
+def test_payments_go_to_oldest_charges_regardless_of_period_in_purpose():
+    from vcb.models import CHARGE, PAYMENT, Entry
+
+    E = lambda d, k, a, ref="": Entry(d, k, SERVICES, "x", Decimal(a), ref=ref)
+    entries = [E(date(2025, 1, 31), CHARGE, "100"), E(date(2025, 2, 28), CHARGE, "100"),
+               E(date(2025, 3, 31), CHARGE, "100"), E(date(2025, 4, 15), PAYMENT, "150", "П1")]
+    lines = build_charge_lines(entries, as_of=date(2025, 5, 1))
+    assert [ln.debt for ln in lines] == [Decimal(0), Decimal(50), Decimal(100)]
+    assert {p.ref for ln in lines for p in ln.portions if p.closed} == {"П1"}

@@ -25,6 +25,7 @@ class Entry:
     purpose: str
     amount: Decimal  # начисление/оплата; перерасчёт может быть отрицательным
     registrar: str = ""
+    ref: str = ""  # идентификатор оплаты для отчёта о разноске
 
 
 @dataclass

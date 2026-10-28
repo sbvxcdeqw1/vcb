@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -12,11 +12,12 @@ from .config import rules_from
 from .court.fee import state_fee
 from .court.registry import CourtRegistry
 from .debtors import debtor_from_account, debtor_from_row
+from .docs.allocation import write_allocation
 from .docs.cards import write_debt_card, write_penalty_card
 from .docs.checkerboard import write_checkerboard
 from .docs.claim import write_claim
 from .docs.context import Case, CategoryResult
-from .models import CAPREPAIR, CHARGE, OPENING, PAYMENT, SERVICES, Debtor, Party
+from .models import CAPREPAIR, CHARGE, OPENING, PAYMENT, PENALTY, SERVICES, Debtor, Entry, Party
 from .money import D, fmt as fmt_money, q
 from .parsers.onec import parse_any
 
@@ -27,8 +28,26 @@ def safe(s: str) -> str:
     return re.sub(r"[^\w\-. ]+", "_", s).strip() or "debtor"
 
 
+def _min_due(as_of: date, years) -> date | None:
+    if not years:
+        return None
+    try:
+        return as_of.replace(year=as_of.year - int(years))
+    except ValueError:  # 29 февраля
+        return as_of.replace(year=as_of.year - int(years), day=28)
+
+
+def _calc(entries, *, as_of, p_from, p_to, min_due, incl_open, rules, rates):
+    """Долг и пени по одной категории при данном наборе проводок. Возвращает (все строки, строки заявления, пени)."""
+    all_lines = build_charge_lines(entries, as_of=as_of, due_day=rules.due_day)
+    lines = select_lines(all_lines, period_from=p_from, period_to=p_to, min_due=min_due, include_opening=incl_open)
+    items = calc_penalty(lines, as_of, rules, rates)
+    return all_lines, lines, items
+
+
 def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: date,
-               registry: CourtRegistry | None, period: tuple[date | None, date | None] = (None, None)) -> Case:
+               registry: CourtRegistry | None, period: tuple[date | None, date | None] = (None, None),
+               payments_path=None, overrides_path=None) -> Case:
     acc = parse_any(card_path)
     debtor = debtor_from_row(row) if row else Debtor()
     auto = debtor_from_account(acc, default_city=(registry.default_city if registry else ""))
@@ -45,34 +64,37 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     rate = rates.at(as_of)
     claim = cfg.get("claim", {})
     incl_open = bool(claim.get("include_opening"))
-    min_due = None
-    if claim.get("limitation_years"):
-        n = int(claim["limitation_years"])
-        try:
-            min_due = as_of.replace(year=as_of.year - n)
-        except ValueError:  # 29 февраля
-            min_due = as_of.replace(year=as_of.year - n, day=28)
+    min_due = _min_due(as_of, claim.get("limitation_years"))
     case = Case(acc, debtor, profile["claimant"], profile["representative"], p_from, p_to, as_of)
     case.notes += acc.warnings
     opening_total = sum((e.amount for e in acc.entries if e.kind == OPENING), Decimal(0))
     if opening_total and not incl_open:
         case.notes.append(f"начальный остаток {fmt_money(opening_total)} руб. не включён в расчёт "
                           f"(claim.include_opening: false)")
+    pay_variants = None
+    if payments_path:
+        pay_variants = _apply_register(case, acc, cfg, payments_path, overrides_path, as_of)
+    kw = dict(as_of=as_of, p_from=p_from, p_to=p_to, min_due=min_due, incl_open=incl_open, rules=rules, rates=rates)
     for cat in (SERVICES, CAPREPAIR):
         entries = [e for e in acc.entries if e.category == cat]
         if not any(e.kind == CHARGE for e in entries):
             continue
-        all_lines = build_charge_lines(entries, as_of=as_of, due_day=rules.due_day)
-        lines = select_lines(all_lines, period_from=p_from, period_to=p_to, min_due=min_due, include_opening=incl_open)
+        all_lines, lines, items = _calc(entries, **kw)
         dropped = [ln for ln in all_lines if not ln.opening and p_from <= ln.accrued <= p_to and ln not in lines
                    and ln.debt > 0]
         if dropped:
             case.notes.append(f"{NAMES[cat]}: за сроком давности исключено {len(dropped)} начислений, "
                               f"{fmt_money(sum((ln.debt for ln in dropped), Decimal(0)))} руб. долга (срок платежа до "
                               f"{min_due:%d.%m.%Y})")
-        items = calc_penalty(lines, as_of, rules, rates)
         shown = [e for e in entries if e.kind in (CHARGE, PAYMENT) or (e.kind == OPENING and incl_open)]
-        case.results[cat] = CategoryResult(cat, shown, lines, items, total_debt(lines), total_penalty(items), rate)
+        res = CategoryResult(cat, shown, lines, items, total_debt(lines), total_penalty(items), rate)
+        res.all_lines = all_lines
+        case.results[cat] = res
+        if pay_variants and cat == SERVICES:
+            for name, pay_entries in pay_variants:
+                base = [e for e in entries if e.kind != PAYMENT]
+                _, ln2, it2 = _calc(base + pay_entries, **kw)
+                case.scenarios.append((name, total_debt(ln2), total_penalty(it2)))
     legal = profile.get("legal") or {}
     case.legal_costs = D(legal.get("costs", 0))
     case.legal_executor, case.legal_contract = legal.get("executor", ""), legal.get("contract", "")
@@ -103,6 +125,45 @@ def _choose_court(case: Case, cfg: dict, registry: CourtRegistry | None):
         case.notes.append(f"не определён суд ({what}) по адресу {case.debtor.address}: нет в справочнике судов")
 
 
+def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, as_of: date):
+    """Оплаты из реестра банковских документов вместо оплат выгрузки: ИП исключаем, остальное - на старые долги."""
+    from .parsers.payments import ENFORCEMENT, THIRD_PARTY, KIND_TITLES, apply_overrides, classify, parse_register
+
+    pays = parse_register(payments_path)
+    classify(pays, cfg)
+    if overrides_path:
+        apply_overrides(pays, overrides_path)
+    starts = [e.date for e in acc.entries if e.kind == OPENING]
+    start = (max(starts) + timedelta(days=1)) if starts else min(e.date for e in acc.entries if e.kind == CHARGE).replace(day=1)
+    in_range = [p for p in pays if start <= p.date <= as_of]
+    case.payments = in_range
+    card_paid = sum((e.amount for e in acc.entries if e.kind == PAYMENT and e.date >= start), Decimal(0))
+    card_paid += sum((e.amount for e in acc.entries if e.kind == PENALTY and "оплат" in e.purpose.lower()
+                      and e.date >= start), Decimal(0))
+    reg_total = sum((p.amount for p in in_range), Decimal(0))
+    if card_paid and abs(card_paid - reg_total) > Decimal("0.005"):
+        case.notes.append(f"оплаты реестра ({fmt_money(reg_total)}) не равны оплатам выгрузки 1С "
+                          f"({fmt_money(card_paid)}) за тот же период")
+    mk = lambda ps: [Entry(p.date, PAYMENT, SERVICES, "Оплата (реестр)", p.amount, p.reason, ref=p.ref) for p in ps]
+    acc.entries = [e for e in acc.entries if e.kind != PAYMENT] + mk([p for p in in_range if p.include])
+    for kind in (ENFORCEMENT, THIRD_PARTY):
+        sub = [p for p in in_range if p.kind == kind]
+        if sub:
+            tot = sum((p.amount for p in sub), Decimal(0))
+            decided = "не зачтено" if not sub[0].include else "зачтено"
+            case.notes.append(f"оплаты «{KIND_TITLES[kind]}»: {len(sub)} шт. на {fmt_money(tot)} руб. — {decided}"
+                              + ("; нужно ваше решение (payments.third_party_policy / --payment-overrides)"
+                                 if any(p.flags for p in sub) else ""))
+    if any(p.date < start for p in pays):
+        case.notes.append(f"оплаты реестра до {start:%d.%m.%Y} не учитываются (они в начальном остатке)")
+    # сценарии для сравнения
+    resident = [p for p in in_range if p.kind not in (ENFORCEMENT,)]
+    only_res = [p for p in in_range if p.kind == "resident"]
+    return [("Все платежи реестра", mk(in_range)),
+            ("Без исполнительного производства", mk(resident)),
+            ("Только оплаты от плательщика", mk(only_res))]
+
+
 def write_case(case: Case, out_dir: Path) -> list[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
@@ -111,6 +172,9 @@ def write_case(case: Case, out_dir: Path) -> list[Path]:
                      ("Шахматка.xlsx", lambda p: write_checkerboard(p, case))]:
         fn(out_dir / name)
         files.append(out_dir / name)
+    if case.payments and SERVICES in case.results:
+        write_allocation(out_dir / "Разноска_оплат.xlsx", case, case.results[SERVICES])
+        files.append(out_dir / "Разноска_оплат.xlsx")
     for cat, res in case.results.items():
         for name, fn in [(f"Карточка_расчета_{NAMES[cat]}.xlsx", write_debt_card),
                          (f"Расчет_пени_{NAMES[cat]}.xlsx", write_penalty_card)]:

@@ -19,6 +19,7 @@ class CategoryResult:
     debt: Decimal
     penalty: Decimal
     rate: Decimal
+    all_lines: list = field(default_factory=list)  # включая начальный остаток и периоды вне заявления
 
     @property
     def total(self) -> Decimal:
@@ -44,6 +45,8 @@ class Case:
     legal_contract: str = ""  # «№ 25-25/юр от 27.06.2025г.»
     legal_executor: str = ""  # «ООО «СВТ»»
     notes: list[str] = field(default_factory=list)  # предупреждения для сводки
+    payments: list = field(default_factory=list)  # оплаты из реестра (parsers.payments.Payment)
+    scenarios: list = field(default_factory=list)  # (название, долг, пени) при разных решениях по оплатам
 
     @property
     def debt(self) -> Decimal:

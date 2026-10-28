@@ -18,6 +18,7 @@ class Portion:
 
     amount: Decimal
     closed: date | None = None
+    ref: str = ""  # какой оплатой погашена
 
 
 @dataclass
@@ -60,12 +61,12 @@ def build_charge_lines(entries: list[Entry], *, as_of: date, due_day: int = 10) 
         ln.portions = [Portion(ln.amount)]
         lines.append(ln)
     lines.sort(key=lambda c: (c.due, c.accrued))
-    events = sorted([("c", ln.accrued, ln) for ln in lines] + [("p", e.date, abs(e.amount)) for e in credits],
+    events = sorted([("c", ln.accrued, ln) for ln in lines] + [("p", e.date, (abs(e.amount), e.ref)) for e in credits],
                     key=lambda x: (x[1], 0 if x[0] == "c" else 1))
     open_lines: list[ChargeLine] = []
-    advance = Decimal(0)  # оплата, поступившая раньше начисления
+    advance: list[tuple[Decimal, str]] = []  # оплаты, поступившие раньше начисления
 
-    def apply(amount: Decimal, when: date) -> Decimal:
+    def apply(amount: Decimal, when: date, ref: str = "") -> Decimal:
         for ln in open_lines:
             if amount <= 0:
                 break
@@ -76,18 +77,19 @@ def build_charge_lines(entries: list[Entry], *, as_of: date, due_day: int = 10) 
             amount -= take
             if take < tail.amount:
                 tail.amount -= take
-                ln.portions.insert(len(ln.portions) - 1, Portion(take, when))
+                ln.portions.insert(len(ln.portions) - 1, Portion(take, when, ref))
             else:
-                tail.closed = when
+                tail.closed, tail.ref = when, ref
         return amount
 
     for kind, when, payload in events:
         if kind == "c":
             open_lines.append(payload)
-            if advance > 0:
-                advance = apply(advance, when)
+            advance[:] = [(rest, ref) for amt, ref in advance if (rest := apply(amt, when, ref)) > 0]
         else:
-            advance = apply(payload, when)
+            amt, ref = payload
+            if (rest := apply(amt, when, ref)) > 0:
+                advance.append((rest, ref))
         open_lines[:] = [ln for ln in open_lines if ln.debt > 0]
     return lines
 

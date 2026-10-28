@@ -56,6 +56,8 @@ def run(argv):
     ap.add_argument("--config", help="свои настройки расчёта (yaml)")
     ap.add_argument("--as-of", help="дата расчёта ГГГГ-ММ-ДД (по умолчанию сегодня)")
     ap.add_argument("--period-from"), ap.add_argument("--period-to")
+    ap.add_argument("--payments", help="реестр банковских документов (оплаты): разноска на самые ранние начисления")
+    ap.add_argument("--payment-overrides", help="csv (;): дата;сумма;зачесть|исключить;комментарий")
     ap.add_argument("--doc", choices=["auto", "order", "claim"], help="судебный приказ / иск")
     ap.add_argument("--no-interactive", action="store_true")
     a = ap.parse_args(argv)
@@ -84,7 +86,8 @@ def run(argv):
     summary, failed = [], 0
     for card in cards:
         try:
-            case = build_case(card, rows.get(card.name.lower()), profile, cfg, as_of, registry, period)
+            case = build_case(card, rows.get(card.name.lower()), profile, cfg, as_of, registry, period,
+                              a.payments, a.payment_overrides)
             folder = out / safe(f"{case.account.number}_{case.debtor.fio}")
             write_case(case, folder)
             summary.append([card.name, case.debtor.fio, case.account.number, fmt(case.debt), fmt(case.penalty),
