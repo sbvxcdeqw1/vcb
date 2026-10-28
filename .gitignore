@@ -1,0 +1,10 @@
+__pycache__/
+*.egg-info/
+out/
+.pytest_cache/
+*.local.yaml
+# обезличенные примеры заказчика с реальными ПДн в git не кладём
+examples/*.xls
+examples/*.xlsx
+examples/*.doc
+examples/*.docx

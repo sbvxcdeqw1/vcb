@@ -1,0 +1,58 @@
+"""Всё, что нужно генераторам документов по одному должнику."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from decimal import Decimal
+
+from ..calc.ledger import ChargeLine
+from ..calc.penalty import PenaltyItem
+from ..models import Account, Debtor, Entry, Party
+
+
+@dataclass
+class CategoryResult:
+    category: str
+    entries: list[Entry]  # проводки периода (начисления и оплаты)
+    lines: list[ChargeLine]
+    penalty_items: list[PenaltyItem]
+    debt: Decimal
+    penalty: Decimal
+    rate: Decimal
+
+    @property
+    def total(self) -> Decimal:
+        return self.debt + self.penalty
+
+
+@dataclass
+class Case:
+    account: Account
+    debtor: Debtor
+    claimant: Party
+    representative: Party
+    period_from: date
+    period_to: date
+    as_of: date
+    results: dict[str, CategoryResult] = field(default_factory=dict)
+    court_name: str = ""
+    court_address: str = ""
+    court_level: str = ""  # district | magistrate
+    doc_kind: str = "claim"  # claim | order
+    fee: Decimal = Decimal(0)
+    legal_costs: Decimal = Decimal(0)
+    legal_contract: str = ""  # «№ 25-25/юр от 27.06.2025г.»
+    legal_executor: str = ""  # «ООО «СВТ»»
+    notes: list[str] = field(default_factory=list)  # предупреждения для сводки
+
+    @property
+    def debt(self) -> Decimal:
+        return sum((r.debt for r in self.results.values()), Decimal(0))
+
+    @property
+    def penalty(self) -> Decimal:
+        return sum((r.penalty for r in self.results.values()), Decimal(0))
+
+    @property
+    def price(self) -> Decimal:
+        return self.debt + self.penalty
