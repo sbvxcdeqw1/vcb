@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import calendar
 import re
-from dataclasses import replace
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from pathlib import Path
 
 from .calc.ledger import build_charge_lines, select_lines, total_debt
@@ -13,7 +13,7 @@ from .court.fee import state_fee
 from .court.registry import CourtRegistry
 from .debtors import debtor_from_account, debtor_from_row
 from .docs.allocation import write_allocation
-from .docs.cards import write_debt_card, write_penalty_card
+from .docs.cards import write_calc_card, write_penalty_card
 from .docs.checkerboard import write_checkerboard
 from .docs.claim import write_claim
 from .docs.context import Case, CategoryResult
@@ -33,6 +33,89 @@ def _to_date(v) -> date | None:
     if not v:
         return None
     return date.fromisoformat(v) if "-" in v else date(int(v[6:10]), int(v[3:5]), int(v[0:2]))
+
+
+def norm_service(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "").strip().lower())
+
+
+def parse_service_list(text) -> set[str]:
+    """«Домофон; видеонаблюдение» (или список) -> нормализованные названия услуг."""
+    if not text:
+        return set()
+    parts = text if isinstance(text, (list, tuple, set)) else re.split(r"[;\n]", str(text))
+    return {norm_service(x) for x in parts if norm_service(x)}
+
+
+def month_end(y: int, m: int) -> date:
+    return date(y, m, calendar.monthrange(y, m)[1])
+
+
+def split_proportional(total: Decimal, weights: dict) -> dict:
+    """Делит сумму между услугами пропорционально начислениям месяца с точностью до копейки."""
+    ws = {k: max(w, Decimal(0)) for k, w in weights.items()}
+    if not ws:
+        return {}
+    s = sum(ws.values())
+    if s == 0:
+        first = next(iter(ws))
+        return {k: (total if k == first else Decimal(0)) for k in ws}
+    raw = {k: total * w / s for k, w in ws.items()}
+    base = {k: (v * 100).to_integral_value(rounding=ROUND_DOWN) / 100 for k, v in raw.items()}
+    cents = int((total - sum(base.values())) * 100)
+    for k in sorted(raw, key=lambda k: raw[k] - base[k], reverse=True)[:max(cents, 0)]:
+        base[k] += Decimal("0.01")
+    return base
+
+
+def _grid_entries(entries, lines, cat) -> list[Entry]:
+    """Шахматка с учётом реестра: начисления по услугам и оплаты, разнесённые на периоды (по услугам - пропорционально
+    начислениям месяца)."""
+    by_month: dict[tuple, dict[str, Decimal]] = {}
+    for e in entries:
+        if e.kind == CHARGE:
+            by_month.setdefault((e.date.year, e.date.month), {})
+            by_month[(e.date.year, e.date.month)][e.purpose] = by_month[(e.date.year, e.date.month)].get(
+                e.purpose, Decimal(0)) + e.amount
+    out: list[Entry] = []
+    for ym, svc in by_month.items():
+        for name, amount in svc.items():
+            out.append(Entry(month_end(*ym), CHARGE, cat, name, amount))
+    for ln in lines:
+        paid = sum((p.amount for p in ln.portions if p.closed is not None), Decimal(0))
+        if paid > 0:
+            for name, part in split_proportional(paid, by_month.get((ln.year, ln.month), {"Оплата": Decimal(1)})).items():
+                if part:
+                    out.append(Entry(month_end(ln.year, ln.month), PAYMENT, cat, name, part))
+    return out
+
+
+def _card_rows(entries, ignored) -> list[tuple]:
+    """Строки карточки расчёта: начисления по месяцам (все услуги вместе) и оплаты, вошедшие в расчёт."""
+    skip = {ref for ref, _, _ in ignored}
+    charges: dict[tuple, Decimal] = {}
+    rows: list[tuple] = []
+    folded: dict[date, Decimal] = {}
+    for e in entries:
+        if e.kind == CHARGE:
+            charges[(e.date.year, e.date.month)] = charges.get((e.date.year, e.date.month), Decimal(0)) + e.amount
+        elif e.kind == PAYMENT and e.ref not in skip:
+            if e.ref:
+                hint = f" за {e.period[1]:02d}.{e.period[0]}" if e.period else ""
+                rows.append((e.date, f"Поступление на расчётный счёт от {e.date:%d.%m.%Y}", f"Оплата{hint}", Decimal(0),
+                             e.amount))
+            else:
+                folded[e.date] = folded.get(e.date, Decimal(0)) + e.amount
+    for (y, m), amount in charges.items():
+        rows.append((month_end(y, m), f"Начисление за {MONTH_NAMES[m - 1]} {y}", "Начисление за услуги", amount,
+                     Decimal(0)))
+    for d, amount in folded.items():
+        rows.append((d, "Оплата по данным шахматки", "Оплата", Decimal(0), amount))
+    return sorted(rows, key=lambda r: (r[0], 0 if r[3] else 1))
+
+
+MONTH_NAMES = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь",
+               "декабрь"]
 
 
 def _in_period(e: Entry, p_from: date, p_to: date) -> bool:
@@ -67,8 +150,13 @@ def _calc(entries, *, as_of, p_from, p_to, min_due, rules, rates, by_purpose=Tru
 
 def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: date,
                registry: CourtRegistry | None, period: tuple[date | None, date | None] = (None, None),
-               payments_path=None, overrides_path=None) -> Case:
+               payments_path=None, overrides_path=None, exclude_services=None) -> Case:
     acc = parse_any(card_path)
+    row = row or {}
+    excluded = parse_service_list(exclude_services) | parse_service_list(row.get("exclude_services"))
+    removed = sorted({e.purpose for e in acc.entries if norm_service(e.purpose) in excluded})
+    if removed:
+        acc.entries = [e for e in acc.entries if norm_service(e.purpose) not in excluded]
     debtor = debtor_from_row(row) if row else Debtor()
     auto = debtor_from_account(acc, default_city=(registry.default_city if registry else ""))
     for f in ("fio", "city", "street", "house", "flat", "account"):  # пустое в реестре - берём из шапки выгрузки
@@ -89,6 +177,9 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     claim = cfg.get("claim", {})
     min_due = _min_due(as_of, claim.get("limitation_years"))
     case = Case(acc, debtor, profile["claimant"], profile["representative"], p_from, p_to, as_of)
+    case.excluded_services = removed
+    if removed:
+        case.notes.append("из расчёта исключены услуги: " + "; ".join(removed))
     case.notes += acc.warnings
     opening_total = sum((e.amount for e in acc.entries if e.kind == OPENING), Decimal(0))
     if opening_total:
@@ -96,6 +187,8 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     pay_variants = None
     if payments_path:
         pay_variants = _apply_register(case, acc, cfg, payments_path, overrides_path, as_of)
+    elif any(e.kind == PAYMENT for e in acc.entries):
+        case.notes.append("реестр оплат не задан: оплаты взяты из выгрузки (без назначения платежа, по месяцам)")
     by_purpose = cfg.get("payments", {}).get("allocation", "purpose") == "purpose"
     kw = dict(as_of=as_of, p_from=p_from, p_to=p_to, min_due=min_due, rules=rules, rates=rates)
     for cat in (SERVICES, CAPREPAIR):
@@ -110,9 +203,21 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
             case.notes.append(f"{NAMES[cat]}: за сроком давности исключено {len(dropped)} начислений, "
                               f"{fmt_money(sum((ln.debt for ln in dropped), Decimal(0)))} руб. долга (срок платежа до "
                               f"{min_due:%d.%m.%Y})")
-        shown = [e for e in entries if e.kind in (CHARGE, PAYMENT) or False]
+        shown = [e for e in entries if e.kind in (CHARGE, PAYMENT)]
         res = CategoryResult(cat, shown, lines, items, total_debt(lines), total_penalty(items), rate)
         res.all_lines, res.ignored = all_lines, ignored
+        res.grid_entries = _grid_entries(entries, lines, cat)
+        res.card_rows = _card_rows(entries, ignored)
+        if cat == SERVICES:
+            why = {ref: w for ref, _, w in ignored}
+            for pay in case.payments:
+                if not pay.include:
+                    res.skipped.append((pay.date, pay.amount, pay.reason))
+                elif pay.ref in why:
+                    res.skipped.append((pay.date, pay.amount, why[pay.ref]))
+                elif not _in_period(Entry(pay.date, PAYMENT, SERVICES, "", pay.amount, period=pay.period_hint),
+                                    p_from, p_to):
+                    res.skipped.append((pay.date, pay.amount, "вне расчётного периода"))
         if ignored:
             case.notes.append(f"{len(ignored)} оплат(ы) на {fmt_money(sum((a for _, a, _ in ignored), Decimal(0)))} руб. "
                               f"отнесены к периодам до начала расчёта и не учтены")
@@ -157,9 +262,16 @@ def _choose_court(case: Case, cfg: dict, registry: CourtRegistry | None):
 
 def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, as_of: date):
     """Оплаты из реестра банковских документов вместо оплат выгрузки: ИП исключаем, остальное - на старые долги."""
-    from .parsers.payments import ENFORCEMENT, THIRD_PARTY, KIND_TITLES, apply_overrides, classify, parse_register
+    from .parsers.payments import (ENFORCEMENT, KIND_TITLES, THIRD_PARTY, apply_overrides, classify, filter_by_account,
+                                   parse_registers)
 
-    pays = parse_register(payments_path)
+    pays = parse_registers(payments_path)
+    pays, other = filter_by_account(pays, acc.number)
+    if other:
+        case.notes.append(f"в реестре оплат отобраны платежи лицевого счёта {acc.number}: {len(pays)} из "
+                          f"{len(pays) + other}")
+    if not pays:
+        case.notes.append(f"в реестре оплат нет платежей лицевого счёта {acc.number}")
     classify(pays, cfg)
     if overrides_path:
         apply_overrides(pays, overrides_path)
@@ -172,7 +284,7 @@ def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, a
                       and e.date >= start), Decimal(0))
     reg_total = sum((p.amount for p in in_range), Decimal(0))
     if card_paid and abs(card_paid - reg_total) > Decimal("0.005"):
-        case.notes.append(f"оплаты реестра ({fmt_money(reg_total)}) не равны оплатам выгрузки 1С "
+        case.notes.append(f"оплаты реестра ({fmt_money(reg_total)}) отличаются от оплат в выгрузке 1С "
                           f"({fmt_money(card_paid)}) за тот же период")
     mk = lambda ps: [Entry(p.date, PAYMENT, SERVICES, "Оплата (реестр)", p.amount, p.reason, ref=p.ref,
                            period=p.period_hint) for p in ps]
@@ -196,20 +308,22 @@ def _apply_register(case: Case, acc, cfg: dict, payments_path, overrides_path, a
             ("Только оплаты от плательщика, на самые ранние", mk(only_res), False)]
 
 
-def write_case(case: Case, out_dir: Path) -> list[Path]:
+def write_case(case: Case, out_dir: Path, claim: bool = True, allocation_report: bool = False) -> list[Path]:
+    """Шахматка с учётом реестра оплат, карточка расчёта и расчёт пени; по желанию - заявление и отчёт о разноске."""
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
-    stem = "Заявление_на_судебный_приказ" if case.doc_kind == "order" else "Исковое_заявление"
-    for name, fn in [(f"{stem}.docx", lambda p: write_claim(p, case)),
-                     ("Шахматка.xlsx", lambda p: write_checkerboard(p, case))]:
+
+    def emit(name, fn):
         fn(out_dir / name)
         files.append(out_dir / name)
-    if case.payments and SERVICES in case.results:
-        write_allocation(out_dir / "Разноска_оплат.xlsx", case, case.results[SERVICES])
-        files.append(out_dir / "Разноска_оплат.xlsx")
+
+    emit("Шахматка_с_учетом_оплат.xlsx", lambda p: write_checkerboard(p, case))
     for cat, res in case.results.items():
-        for name, fn in [(f"Карточка_расчета_{NAMES[cat]}.xlsx", write_debt_card),
-                         (f"Расчет_пени_{NAMES[cat]}.xlsx", write_penalty_card)]:
-            fn(out_dir / name, case, res)
-            files.append(out_dir / name)
+        emit(f"Карточка_расчета_{NAMES[cat]}.xlsx", lambda p, res=res: write_calc_card(p, case, res))
+        emit(f"Расчет_пени_{NAMES[cat]}.xlsx", lambda p, res=res: write_penalty_card(p, case, res))
+    if claim:
+        stem = "Заявление_на_судебный_приказ" if case.doc_kind == "order" else "Исковое_заявление"
+        emit(f"{stem}.docx", lambda p: write_claim(p, case))
+    if allocation_report and case.payments and SERVICES in case.results:
+        emit("Разноска_оплат.xlsx", lambda p: write_allocation(p, case, case.results[SERVICES]))
     return files

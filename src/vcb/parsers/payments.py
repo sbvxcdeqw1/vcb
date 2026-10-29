@@ -101,3 +101,31 @@ def apply_overrides(payments: list[Payment], path: str | Path) -> None:
             if p.date == d and (p.amount == amt or row[1].strip() in ("*", "")):
                 p.include = what.startswith(("зачесть", "включ", "include"))
                 p.flags = [f for f in p.flags if not f.startswith("нужно")] + [f"решение вручную: {what}"]
+
+
+def parse_registers(path: str | Path) -> list[Payment]:
+    """Реестр оплат: один файл или папка с несколькими файлами (платежи объединяются)."""
+    path = Path(path)
+    files = sorted(f for f in path.iterdir() if f.suffix.lower() in (".xls", ".xlsx") and not f.name.startswith("~")) \
+        if path.is_dir() else [path]
+    out: list[Payment] = []
+    for f in files:
+        out += parse_register(f)
+    for n, p in enumerate(out, 1):
+        p.ref = f"П{n:03d}"
+    return out
+
+
+LEAD_ACCOUNT = re.compile(r"^\s*(\d{6,})\b")
+
+
+def filter_by_account(pays: list[Payment], number: str) -> tuple[list[Payment], int]:
+    """В общем реестре банка оставляет платежи нужного лицевого счёта («551010009822, ФИО (л/с) / ...»).
+    Если в реестре нет ни одного платежа с лицевым счётом в начале назначения - возвращает всё без изменений."""
+    if not number or not number.isdigit():
+        return pays, 0
+    attributed = [p for p in pays if LEAD_ACCOUNT.match(p.info)]
+    if not attributed:
+        return pays, 0
+    keep = [p for p in pays if (m := LEAD_ACCOUNT.match(p.info)) and m.group(1) == number]
+    return keep, len(pays) - len(keep)

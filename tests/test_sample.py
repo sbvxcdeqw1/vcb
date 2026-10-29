@@ -231,7 +231,7 @@ def test_typography_and_print_setup(tmp_path):
     prof = {"claimant": Party(), "representative": Party(), "legal": {}}
     case = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
     write_case(case, tmp_path)
-    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка.xlsx", True)):
+    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат.xlsx", True)):
         ws = load_workbook(tmp_path / name).worksheets[0]
         assert ws.page_setup.paperSize == 9 and (ws.page_setup.orientation == "landscape") == landscape
         assert ws.print_title_rows
@@ -263,3 +263,55 @@ def test_every_xlsx_has_signature_block_with_representative(tmp_path):
             text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
             assert "Представитель ООО «Тест»" in text and "/ П.П.Петров /" in text and "(Петров Пётр Петрович)" in text, \
                 f"{f.name}/{ws.title}"
+
+
+def test_split_proportional_keeps_cents():
+    from vcb.pipeline import split_proportional
+
+    parts = split_proportional(Decimal("100.00"), {"a": Decimal("1"), "b": Decimal("1"), "c": Decimal("1")})
+    assert sum(parts.values()) == Decimal("100.00") and sorted(parts.values()) == [Decimal("33.33")] * 2 + [Decimal("33.34")]
+    assert split_proportional(Decimal("5"), {"a": Decimal(0), "b": Decimal(0)}) == {"a": Decimal("5"), "b": Decimal(0)}
+
+
+def test_gui_flags_for_services_and_outputs():
+    pytest.importorskip("tkinter")
+    import vcb_gui
+
+    argv = vcb_gui.build_argv({"source": "a.xlsx", "exclude_services": "Домофон; видеонаблюдение", "no_claim": True,
+                               "allocation_report": True})
+    assert argv[argv.index("--exclude-services") + 1] == "Домофон; видеонаблюдение"
+    assert "--no-claim" in argv and "--allocation-report" in argv
+
+
+REG98 = Path(__file__).parent.parent / "examples" / "oplaty_kv98.xlsx"
+
+
+@pytest.mark.skipif(not (CHESS.exists() and REG98.exists()), reason="нет примеров кв. 98")
+def test_chess_plus_register_pipeline(tmp_path):
+    from openpyxl import load_workbook
+
+    from vcb.config import load_config
+    from vcb.models import Party
+    from vcb.parsers.chess import list_services
+    from vcb.pipeline import build_case, write_case
+
+    services = dict(list_services(CHESS))
+    assert "Домофон" in services and services["Домофон"] == Decimal("2590")
+    prof = {"claimant": Party(), "representative": Party(), "legal": {}}
+    as_of = date(2026, 7, 31)
+    full = build_case(CHESS, None, prof, load_config(), as_of, None, (None, None), REG98)
+    less = build_case(CHESS, None, prof, load_config(), as_of, None, (None, None), REG98,
+                      exclude_services="домофон;  Видеонаблюдение")
+    assert less.excluded_services == ["Домофон", "видеонаблюдение"]
+    assert less.results[SERVICES].debt < full.results[SERVICES].debt
+    res = full.results[SERVICES]
+    # карточка (начисления - оплаты) и шахматка с разнесёнными оплатами сходятся с долгом расчёта
+    assert sum(r[3] for r in res.card_rows) - sum(r[4] for r in res.card_rows) == res.debt
+    grid = res.grid_entries
+    assert sum(e.amount for e in grid if e.kind == "charge") - sum(e.amount for e in grid if e.kind == "payment") == res.debt
+    files = write_case(full, tmp_path, claim=False)
+    assert sorted(f.name for f in files) == ["Карточка_расчета_ЖКУ.xlsx", "Расчет_пени_ЖКУ.xlsx",
+                                              "Шахматка_с_учетом_оплат.xlsx"]
+    ws = load_workbook(tmp_path / "Карточка_расчета_ЖКУ.xlsx").worksheets[0]
+    heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
+    assert "Задолженность, руб." in heads

@@ -24,7 +24,8 @@ ZERO = Decimal(0)
 
 
 def write_checkerboard(path, case: Case):
-    entries = [e for e in case.account.entries if e.kind in (CHARGE, PAYMENT, OPENING) and e.date <= case.as_of]
+    grid = [e for res in case.results.values() for e in res.grid_entries]
+    entries = [e for e in (grid or case.account.entries) if e.kind in (CHARGE, PAYMENT, OPENING) and e.date <= case.as_of]
     if not entries:
         return
     services = list(OrderedDict.fromkeys(e.purpose for e in entries))

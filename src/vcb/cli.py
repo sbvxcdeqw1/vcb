@@ -49,7 +49,7 @@ def main(argv=None):
 def run(argv):
     ap = argparse.ArgumentParser(prog="vcb", description="Заявления в суд и карточки расчёта по ЖКУ из выгрузок 1С")
     ap.add_argument("--version", action="version", version=f"vcb {__version__}")
-    ap.add_argument("input", help="выгрузка 1С (xls/xlsx) или папка с выгрузками (пакетный режим)")
+    ap.add_argument("input", help="шахматка 1С (xls/xlsx) или папка с шахматками (пакетный режим)")
     ap.add_argument("-o", "--out", default="out", help="папка результата")
     ap.add_argument("-r", "--registry", help="реестр должников (csv/xlsx): набор полей по каждому должнику")
     ap.add_argument("--profile", help="профиль взыскателя и представителя (yaml); без него - спросим")
@@ -58,8 +58,11 @@ def run(argv):
     ap.add_argument("--config", help="свои настройки расчёта (yaml)")
     ap.add_argument("--as-of", help="дата расчёта ГГГГ-ММ-ДД (по умолчанию сегодня)")
     ap.add_argument("--period-from"), ap.add_argument("--period-to")
-    ap.add_argument("--payments", help="реестр банковских документов (оплаты): разноска на самые ранние начисления")
+    ap.add_argument("--payments", help="реестр оплат (файл или папка): оплаты разносятся по назначению платежа; общий реестр фильтруется по лицевому счёту")
     ap.add_argument("--payment-overrides", help="csv (;): дата;сумма;зачесть|исключить;комментарий")
+    ap.add_argument("--exclude-services", help="услуги шахматки, снятые с расчёта, через «;» (например: Домофон; видеонаблюдение)")
+    ap.add_argument("--no-claim", action="store_true", help="не готовить заявление/иск")
+    ap.add_argument("--allocation-report", action="store_true", help="дополнительно сохранить отчёт о разноске оплат")
     ap.add_argument("--doc", choices=["auto", "order", "claim"], help="судебный приказ / иск")
     ap.add_argument("--no-interactive", action="store_true")
     a = ap.parse_args(argv)
@@ -89,9 +92,9 @@ def run(argv):
     for card in cards:
         try:
             case = build_case(card, rows.get(card.name.lower()), profile, cfg, as_of, registry, period,
-                              a.payments, a.payment_overrides)
+                              a.payments, a.payment_overrides, a.exclude_services)
             folder = out / safe(f"{case.account.number}_{case.debtor.fio}")
-            write_case(case, folder)
+            write_case(case, folder, claim=not a.no_claim, allocation_report=a.allocation_report)
             summary.append([card.name, case.debtor.fio, case.account.number, fmt(case.debt), fmt(case.penalty),
                             fmt(case.price), fmt(case.fee), case.doc_kind, case.court_name, "; ".join(case.notes),
                             str(folder)])

@@ -29,52 +29,67 @@ def _lines(case: Case, title: str, category: str) -> list[tuple[str, str]]:
     return lines
 
 
-def _card_rows(case: Case, res: CategoryResult):
-    """Строки карточки. Если в выгрузке есть регистраторы (карточка 1С) - как в выгрузке; иначе (шахматка по услугам)
-    проводки свёрнуты по датам, чтобы карточка занимала страницу-две, а не десять."""
-    rows = [e for e in sorted(res.entries, key=lambda e: e.date)
-            if e.kind == OPENING or case.period_from <= e.date <= case.as_of]
-    if any(e.registrar for e in rows):
-        return [(e.date, e.registrar, e.purpose, e.kind, e.amount) for e in rows]
-    folded: dict[tuple, Decimal] = {}
-    for e in rows:
-        folded[(e.date, e.kind)] = folded.get((e.date, e.kind), Decimal(0)) + e.amount
-    names = {CHARGE: "Начислено за месяц", PAYMENT: "Оплата", OPENING: "Начальный остаток"}
-    return [(d, "", names[k], k, a) for (d, k), a in folded.items()]
-
-
-def write_debt_card(path, case: Case, res: CategoryResult):
-    """Образец: «Расчет задолженности собственника жилья» (Дата, Регистратор, Операция, Начислено, Оплата)."""
+def write_calc_card(path, case: Case, res: CategoryResult):
+    """Карточка расчёта задолженности (по образцам «Расчет задолженности собственника жилья» и «Карточка расчетов»):
+    только тело долга и оплаты, без пеней. Начисления - из шахматки, оплаты - из реестра, нарастающий итог по строкам."""
     wb = Workbook()
     ws = wb.active
-    ws.title = "Расчет задолженности"
-    hdr = title_block(ws, 5, _lines(case, "Расчёт задолженности собственника жилья", res.category))
-    header_row(ws, hdr, ["Дата", "Регистратор", "Операция", "Начислено, руб.", "Оплата, руб."])
+    ws.title = "Карточка расчёта"
+    lines = _lines(case, "Расчёт задолженности собственника жилья", res.category)
+    lines.insert(-1, ("Тело долга и оплаты; пени — в отдельном расчёте. Начисления — по шахматке, оплаты — по реестру "
+                      "банковских документов.", "center"))
+    if case.excluded_services:
+        lines.insert(-1, ("Исключены из расчёта услуги: " + "; ".join(case.excluded_services), "left"))
+    hdr = title_block(ws, 6, lines)
+    header_row(ws, hdr, ["Дата", "Регистратор", "Операция", "Начислено, руб.", "Оплата, руб.", "Задолженность, руб."])
     r = hdr + 1
-    first = r
-    for when, registrar, purpose, kind, amount in _card_rows(case, res):
+    put(ws, f"A{r}", f"Сальдо на {case.period_from:%d.%m.%Y}", bold=True, border=True, fill=TOTAL_FILL)
+    for col in "BCDE":
+        put(ws, f"{col}{r}", None, border=True, fill=TOTAL_FILL)
+    ws.merge_cells(f"A{r}:E{r}")
+    put(ws, f"F{r}", 0, bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
+    start = r + 1
+    r = start
+    for when, registrar, purpose, charged, paid in res.card_rows:
         put(ws, f"A{r}", when, border=True, fmt="DD.MM.YYYY", align=LEFT)
         put(ws, f"B{r}", registrar, border=True, align=LEFT)
         put(ws, f"C{r}", purpose, border=True, align=LEFT)
-        put(ws, f"D{r}", amount if kind in (CHARGE, OPENING) else None, border=True, fmt=MONEY)
-        put(ws, f"E{r}", amount if kind == PAYMENT else None, border=True, fmt=MONEY)
+        put(ws, f"D{r}", charged or None, border=True, fmt=MONEY)
+        put(ws, f"E{r}", paid or None, border=True, fmt=MONEY)
+        put(ws, f"F{r}", f"=F{r - 1}+D{r}-E{r}", border=True, fmt=MONEY)
         r += 1
     put(ws, f"A{r}", "Обороты за период", bold=True, border=True, fill=TOTAL_FILL)
     for col in "BC":
         put(ws, f"{col}{r}", None, border=True, fill=TOTAL_FILL)
-    put(ws, f"D{r}", f"=SUM(D{first}:D{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
-    put(ws, f"E{r}", f"=SUM(E{first}:E{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
     ws.merge_cells(f"A{r}:C{r}")
-    put(ws, f"A{r + 1}", f"Задолженность на {case.as_of:%d.%m.%Y}, руб.", bold=True, border=True, fill=TOTAL_FILL)
-    for col in "BCD":
+    put(ws, f"D{r}", f"=SUM(D{start}:D{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
+    put(ws, f"E{r}", f"=SUM(E{start}:E{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
+    put(ws, f"F{r}", None, border=True, fill=TOTAL_FILL)
+    put(ws, f"A{r + 1}", f"Сальдо на {case.as_of:%d.%m.%Y}", bold=True, border=True, fill=TOTAL_FILL)
+    for col in "BCDE":
         put(ws, f"{col}{r + 1}", None, border=True, fill=TOTAL_FILL)
-    ws.merge_cells(f"A{r + 1}:D{r + 1}")
-    put(ws, f"E{r + 1}", f"=D{r}-E{r}", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
-    signature_block(ws, r + 4, case, ncols=3)
-    has_reg = any(row[1] for row in _card_rows(case, res))
-    widths(ws, {"A": 12, "B": 46 if has_reg else 14, "C": 26 if has_reg else 34, "D": 16, "E": 16})
+    ws.merge_cells(f"A{r + 1}:E{r + 1}")
+    put(ws, f"F{r + 1}", f"=F{r - 1}" if r > start else "=F" + str(start - 1), bold=True, border=True, fmt=MONEY,
+        fill=TOTAL_FILL)
+    nxt = r + 3
+    if res.skipped:
+        put(ws, f"A{nxt}", "Платежи реестра, не вошедшие в расчёт:", bold=True, size=9)
+        nxt += 1
+        for when, amount, why in sorted(res.skipped)[:25]:
+            ws.merge_cells(f"A{nxt}:F{nxt}")
+            put(ws, f"A{nxt}", f"{when:%d.%m.%Y}  {money_fmt(amount)} руб. — {why}", size=9, align=LEFT)
+            nxt += 1
+        if len(res.skipped) > 25:
+            put(ws, f"A{nxt}", f"… и ещё {len(res.skipped) - 25}", size=9)
+            nxt += 1
+        nxt += 1
+    signature_block(ws, nxt + 1, case, ncols=3)
+    widths(ws, {"A": 12, "B": 36, "C": 24, "D": 15, "E": 15, "F": 17})
     setup_print(ws, landscape=False, title_rows=f"{hdr}:{hdr}", footer_left=f"vcb {__version__}")
     wb.save(path)
+
+
+write_debt_card = write_calc_card  # прежнее имя
 
 
 def _merge_items(res: CategoryResult) -> dict:

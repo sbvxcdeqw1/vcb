@@ -20,6 +20,9 @@ class CategoryResult:
     penalty: Decimal
     rate: Decimal
     ignored: list = field(default_factory=list)  # оплаты вне периода расчёта: (ref, сумма, причина)
+    grid_entries: list = field(default_factory=list)  # начисления и разнесённые оплаты по услугам и месяцам (шахматка)
+    card_rows: list = field(default_factory=list)  # строки карточки: (дата, регистратор, операция, начислено, оплата)
+    skipped: list = field(default_factory=list)  # платежи, не вошедшие в расчёт: (дата, сумма, причина)
     all_lines: list = field(default_factory=list)  # включая начальный остаток и периоды вне заявления
 
     @property
@@ -47,6 +50,7 @@ class Case:
     legal_executor: str = ""  # «ООО «СВТ»»
     notes: list[str] = field(default_factory=list)  # предупреждения для сводки
     payments: list = field(default_factory=list)  # оплаты из реестра (parsers.payments.Payment)
+    excluded_services: list = field(default_factory=list)  # услуги, снятые оператором с расчёта
     scenarios: list = field(default_factory=list)  # (название, долг, пени) при разных решениях по оплатам
 
     @property

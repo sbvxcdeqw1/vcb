@@ -21,6 +21,7 @@ import tempfile
 import threading
 import tkinter as tk
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
@@ -93,6 +94,12 @@ def build_argv(v: dict) -> list[str]:
             argv += [flag, d]
     if v.get("doc") in ("order", "claim"):
         argv += ["--doc", v["doc"]]
+    if v.get("exclude_services"):
+        argv += ["--exclude-services", v["exclude_services"]]
+    if v.get("no_claim"):
+        argv.append("--no-claim")
+    if v.get("allocation_report"):
+        argv.append("--allocation-report")
     return argv
 
 
@@ -198,7 +205,7 @@ class App:
         self.win = ctk.CTk(fg_color=COLORS["bg"])
         from vcb import __version__  # noqa: PLC0415
 
-        self.win.title(f"vcb {__version__} — заявления в суд и расчёты по ЖКУ")
+        self.win.title(f"vcb {__version__} — расчёт задолженности по ЖКУ и заявление в суд")
         self.win.geometry("1040x860")
         self.win.minsize(900, 680)
         from vcb.config import DATA, ROOT  # noqa: PLC0415
@@ -263,9 +270,12 @@ class App:
                            fg_color=COLORS["field"], border_color=COLORS["line"], text_color=COLORS["text"],
                            placeholder_text_color="#5d6678")
         ent.grid(row=1, column=0, sticky="ew")
-        ctk.CTkButton(cell, text=button, width=130, height=38, corner_radius=12, fg_color=COLORS["field"],
-                      hover_color=COLORS["line"], border_width=1, border_color=COLORS["line"],
-                      command=lambda: self.pick(key, kind)).grid(row=1, column=1, padx=(8, 0))
+        btns = ctk.CTkFrame(cell, fg_color="transparent")
+        btns.grid(row=1, column=1, padx=(8, 0))
+        for text, k in ((("Файл…", "file"), ("Папка…", "dir")) if kind == "both" else ((button, kind),)):
+            ctk.CTkButton(btns, text=text, width=100 if kind == "both" else 130, height=38, corner_radius=12,
+                          fg_color=COLORS["field"], hover_color=COLORS["line"], border_width=1,
+                          border_color=COLORS["line"], command=lambda k=k: self.pick(key, k)).pack(side="left", padx=2)
         self.entries[key] = ent
 
     def history_menu(self, body, kind: str, prefix: str, fields: list, row: int):
@@ -321,15 +331,16 @@ class App:
         self.scroll.grid(row=1, column=0, sticky="nsew", padx=18, pady=0)
         s = self.scroll
 
-        # 1. данные 1С
-        self.src_card, body = self.card(s, "1. Выгрузка из 1С")
+        # 1. входящие документы
+        self.src_card, body = self.card(s, "1. Исходные документы", "Шахматка из 1С и реестр оплат из банка. "
+                                        "Начисления берутся из шахматки, оплаты — из реестра.")
         self.src_body = body
         self.src_single = ctk.CTkFrame(body, fg_color="transparent")
         self.src_batch = ctk.CTkFrame(body, fg_color="transparent")
-        self.pick_row(self.src_single, "source_file", "Файл выгрузки (Карточка расчётов или Шахматка)",
-                      "Выбрать файл…", "file", "Excel-файл .xls или .xlsx")
-        self.pick_row(self.src_batch, "source_dir", "Папка с выгрузками (по одному файлу на должника)",
-                      "Выбрать папку…", "dir", "Папка, где лежат .xls / .xlsx всех должников")
+        self.pick_row(self.src_single, "source_file", "Шахматка (Excel-файл из 1С) *", "Выбрать файл…", "file",
+                      ".xls или .xlsx — «Шахматка» по лицевому счёту должника")
+        self.pick_row(self.src_batch, "source_dir", "Папка с шахматками (по одному файлу на должника) *",
+                      "Выбрать папку…", "dir", "Папка, где лежат шахматки всех должников")
         self.pick_row(self.src_batch, "registry", "Реестр должников (необязательно)", "Выбрать файл…", "file",
                       "Таблица с ФИО, адресами и периодами; шаблон можно создать кнопкой ниже", row=1)
         batch_btns = ctk.CTkFrame(self.src_batch, fg_color="transparent")
@@ -341,12 +352,34 @@ class App:
                      text_color=COLORS["muted"]).pack(side="left")
         self.pay_holder = ctk.CTkFrame(body, fg_color="transparent")
         self.pay_holder.pack(fill="x")
-        self.pick_row(self.pay_holder, "payments", "Реестр оплат (необязательно)", "Выбрать файл…", "file",
-                      "Реестр банковских документов: тогда оплаты разносятся по назначению платежа")
+        self.pick_row(self.pay_holder, "payments", "Реестр оплат *", "", "both",
+                      "Реестр банковских документов (файл или папка). Общий реестр банка подойдёт: платежи отберутся "
+                      "по лицевому счёту")
         self.src_single.pack(fill="x")
+        for key in ("source_file", "source_dir"):
+            self.vars[key].trace_add("write", lambda *a: self._schedule_services())
+
+        # 2. услуги
+        self.svc_card, body = self.card(s, "2. Услуги в расчёте", "Снимите галочку с услуг, которые не нужно включать "
+                                        "в расчёт долга и пени. Список читается из выбранной шахматки.")
+        self.svc_body = body
+        self.svc_vars: dict[str, tk.BooleanVar] = {}
+        self.svc_names: dict[str, str] = {}
+        self.svc_hint = ctk.CTkLabel(body, text="Выберите шахматку — здесь появятся её услуги.",
+                                     text_color=COLORS["muted"], anchor="w")
+        self.svc_hint.pack(fill="x", padx=8, pady=4)
+        self.svc_grid = ctk.CTkFrame(body, fg_color="transparent")
+        self.svc_grid.pack(fill="x")
+        svc_btns = ctk.CTkFrame(body, fg_color="transparent")
+        svc_btns.pack(fill="x", pady=(6, 0))
+        for text, val in (("Отметить все", True), ("Снять все", False)):
+            ctk.CTkButton(svc_btns, text=text, height=30, corner_radius=10, fg_color=COLORS["field"],
+                          hover_color=COLORS["line"], border_width=1, border_color=COLORS["line"], width=130,
+                          command=lambda v=val: [x.set(v) for x in self.svc_vars.values()]).pack(side="left", padx=4)
+        self._svc_job = None
 
         # 2. должник (только режим «один»)
-        self.debtor_card, body = self.card(s, "2. Должник", "Данные из выгрузки подставятся сами; "
+        self.debtor_card, body = self.card(s, "3. Должник", "Данные из выгрузки подставятся сами; "
                                            "заполните то, чего в ней нет. Введённое сохранится в истории.")
         self.history_menu(body, "debtor", "debtor", DEBTOR_FIELDS, 0)
         grid = ctk.CTkFrame(body, fg_color="transparent")
@@ -355,7 +388,7 @@ class App:
         self.grid_fields(grid, "debtor", DEBTOR_FIELDS)
 
         # 3. взыскатель
-        self.claimant_card, body = self.card(s, "3. Взыскатель", "Можно не заполнять — в документах останутся пустые поля.")
+        self.claimant_card, body = self.card(s, "4. Взыскатель", "Можно не заполнять — в документах останутся пустые поля.")
         self.history_menu(body, "claimant", "claimant", CLAIMANT_FIELDS, 0)
         grid = ctk.CTkFrame(body, fg_color="transparent")
         grid.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -363,7 +396,7 @@ class App:
         self.grid_fields(grid, "claimant", CLAIMANT_FIELDS)
 
         # 4. представитель
-        self.rep_card, body = self.card(s, "4. Представитель взыскателя")
+        self.rep_card, body = self.card(s, "5. Представитель взыскателя")
         self.history_menu(body, "rep", "rep", REP_FIELDS, 0)
         grid = ctk.CTkFrame(body, fg_color="transparent")
         grid.grid(row=1, column=0, columnspan=2, sticky="ew")
@@ -371,12 +404,12 @@ class App:
         self.grid_fields(grid, "rep", REP_FIELDS)
 
         # 5. расходы на юриста
-        self.legal_card, body = self.card(s, "5. Расходы на юридические услуги (необязательно)",
+        self.legal_card, body = self.card(s, "6. Расходы на юридические услуги (необязательно)",
                                           "Если заполнить, в заявлении появится требование о взыскании судебных расходов.")
         self.grid_fields(body, "legal", LEGAL_FIELDS, cols=3)
 
         # 6. параметры
-        _, body = self.card(s, "6. Параметры расчёта")
+        _, body = self.card(s, "7. Параметры расчёта")
         body.columnconfigure((0, 1, 2), weight=1, uniform="par")
         today = date.today().strftime("%d.%m.%Y")
         self.field(body, "par", "as_of", "Рассчитать на дату", "дд.мм.гггг", 0, 0).insert(0, today)
@@ -403,8 +436,16 @@ class App:
                                      corner_radius=12, fg_color=COLORS["field"], button_color=COLORS["line"],
                                      button_hover_color=COLORS["accent"], dropdown_fg_color=COLORS["field"])
             menu.pack(fill="x")
+        opts = ctk.CTkFrame(body, fg_color="transparent")
+        opts.grid(row=2, column=0, columnspan=3, sticky="w", padx=6, pady=(10, 2))
+        self.claim_var = tk.BooleanVar(value=True)
+        self.alloc_var = tk.BooleanVar(value=False)
+        for text, var in (("Подготовить заявление в суд (иск или судебный приказ)", self.claim_var),
+                          ("Сохранить отчёт о разноске оплат (для проверки)", self.alloc_var)):
+            ctk.CTkCheckBox(opts, text=text, variable=var, corner_radius=6, checkmark_color="#ffffff",
+                            fg_color=COLORS["accent"], border_color=COLORS["line"]).pack(anchor="w", pady=3)
         out = ctk.CTkFrame(body, fg_color="transparent")
-        out.grid(row=2, column=0, columnspan=3, sticky="ew")
+        out.grid(row=3, column=0, columnspan=3, sticky="ew")
         self.pick_row(out, "out", "Папка для готовых документов", "Выбрать папку…", "dir")
         self.vars["out"].set(str(Path.home() / "vcb_результаты"))
 
@@ -438,10 +479,67 @@ class App:
             self.src_batch.pack_forget()
             self.src_single.pack(fill="x", before=self.pay_holder)
             self.debtor_card.pack(fill="x", padx=6, pady=7, before=self.claimant_card)
+            self.refresh_services()
         else:
             self.src_single.pack_forget()
             self.src_batch.pack(fill="x", before=self.pay_holder)
             self.debtor_card.pack_forget()
+            self.refresh_services()
+
+    # ---- услуги шахматки
+    def _schedule_services(self):
+        if self._svc_job:
+            self.win.after_cancel(self._svc_job)
+        self._svc_job = self.win.after(500, self.refresh_services)
+
+    def _chess_files(self) -> list[Path]:
+        single = self.mode.get() == "Один должник"
+        raw = self.vars["source_file" if single else "source_dir"].get().strip()
+        path = Path(raw) if raw else None
+        if not path or not path.exists():
+            return []
+        if path.is_file():
+            return [path]
+        return sorted(f for f in path.iterdir() if f.suffix.lower() in (".xls", ".xlsx") and not f.name.startswith("~"))
+
+    def refresh_services(self):
+        """Читает услуги из выбранных шахматок и показывает по галочке на каждую."""
+        from vcb.money import fmt  # noqa: PLC0415
+        from vcb.parsers.chess import list_services  # noqa: PLC0415
+        from vcb.pipeline import norm_service  # noqa: PLC0415
+
+        self._svc_job = None
+        totals: dict[str, float] = {}
+        names: dict[str, str] = {}
+        for f in self._chess_files():
+            try:
+                for name, total in list_services(f):
+                    key = norm_service(name)
+                    names.setdefault(key, name)
+                    totals[key] = totals.get(key, 0) + float(total)
+            except Exception:  # noqa: BLE001
+                continue
+        previous = {k: v.get() for k, v in self.svc_vars.items()}
+        for w in self.svc_grid.winfo_children():
+            w.destroy()
+        self.svc_vars, self.svc_names = {}, names
+        if not names:
+            self.svc_hint.configure(text="Выберите шахматку — здесь появятся её услуги." if not self._chess_files()
+                                    else "В выбранном файле не найдено услуг: это точно «Шахматка» из 1С?")
+            return
+        self.svc_hint.configure(text=f"Найдено услуг: {len(names)}. Отмеченные участвуют в расчёте.")
+        self.svc_grid.columnconfigure((0, 1), weight=1, uniform="svc")
+        for i, (key, name) in enumerate(names.items()):
+            var = tk.BooleanVar(value=previous.get(key, True))
+            self.svc_vars[key] = var
+            amount = totals[key]
+            label = f"{name}   ·   {fmt(Decimal(str(round(amount, 2))))} ₽" if amount else name
+            self.ctk.CTkCheckBox(self.svc_grid, text=label, variable=var, corner_radius=6, checkmark_color="#ffffff",
+                            fg_color=COLORS["accent"], border_color=COLORS["line"], text_color=COLORS["text"]
+                            ).grid(row=i // 2, column=i % 2, sticky="w", padx=8, pady=4)
+
+    def excluded_services(self) -> str:
+        return "; ".join(self.svc_names[k] for k, v in self.svc_vars.items() if not v.get())
 
     # ---- действия
     def pick(self, key: str, kind: str):
@@ -483,15 +581,26 @@ class App:
         tmp = Path(tempfile.mkdtemp(prefix="vcb_"))
         try:
             source = self.vars["source_file" if single else "source_dir"].get().strip()
-            if single and source and not Path(source).is_file():
-                raise ValueError("выбранный файл выгрузки не найден")
-            if not single and source and not Path(source).is_dir():
-                raise ValueError("выбранная папка с выгрузками не найдена")
+            if not source:
+                raise ValueError("укажите шахматку" if single else "укажите папку с шахматками")
+            if single and not Path(source).is_file():
+                raise ValueError("выбранный файл шахматки не найден")
+            if not single and not Path(source).is_dir():
+                raise ValueError("выбранная папка с шахматками не найдена")
+            pay = self.vars["payments"].get().strip()
+            if pay and not Path(pay).exists():
+                raise ValueError("выбранный реестр оплат не найден")
+            if not pay and not messagebox.askyesno(
+                    "vcb", "Реестр оплат не выбран.\n\nОплаты будут взяты из самой шахматки — без назначения платежа и "
+                           "без отбора платежей по исполнительному производству. Продолжить?"):
+                return
             v = {"source": source, "out": self.vars["out"].get().strip(), "payments": self.vars["payments"].get().strip(),
                  "as_of": self.vars["par.as_of"].get(), "period_from": self.vars["par.period_from"].get(),
                  "period_to": self.vars["par.period_to"].get(),
                  "doc": DOC_CHOICES.get(self.vars["par.doc"].get(), "auto"),
-                 "region": self.regions.get(self.vars["par.region"].get(), "perm_krai")}
+                 "region": self.regions.get(self.vars["par.region"].get(), "perm_krai"),
+                 "exclude_services": self.excluded_services(), "no_claim": not self.claim_var.get(),
+                 "allocation_report": self.alloc_var.get()}
             claimant = self.values("claimant", CLAIMANT_FIELDS)
             rep = self.values("rep", REP_FIELDS)
             legal = self.values("legal", LEGAL_FIELDS)

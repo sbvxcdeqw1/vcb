@@ -93,3 +93,19 @@ def parse_chess(path: str | Path, rows: list[list] | None = None) -> Account:
                 acc.warnings.append(f"{name}: конечный остаток {r[closing_col]} не сходится с расчётным "
                                     f"{opening + charged - paid}")
     return acc
+
+
+def list_services(path: str | Path) -> list[tuple[str, "Decimal"]]:
+    """Услуги шахматки в порядке файла и сумма их начислений - чтобы оператор мог снять галочки до расчёта."""
+    from decimal import Decimal
+
+    rows = _rows(Path(path))
+    if not is_chess(rows):
+        return []
+    acc = parse_chess(path, rows)
+    order: dict[str, Decimal] = {}
+    for e in acc.entries:
+        order.setdefault(e.purpose, Decimal(0))
+        if e.kind == CHARGE:
+            order[e.purpose] += e.amount
+    return list(order.items())
