@@ -241,3 +241,25 @@ def test_typography_and_print_setup(tmp_path):
     sec = doc.sections[0]
     assert round(sec.left_margin.cm, 1) == 3.0 and round(sec.right_margin.cm, 1) == 1.0
     assert doc.styles["Normal"].font.size.pt == 14 and doc.styles["Normal"].font.name == "Times New Roman"
+
+
+def test_every_xlsx_has_signature_block_with_representative(tmp_path):
+    from openpyxl import load_workbook
+
+    from vcb.config import load_config
+    from vcb.models import Party
+    from vcb.pipeline import build_case, write_case
+
+    if not SAMPLE.exists():
+        pytest.skip("нет примера выгрузки")
+    prof = {"claimant": Party(short_name="ООО «Тест»"), "representative": Party(name="Петров Пётр Петрович",
+                                                                            sign_name="П.П.Петров"), "legal": {}}
+    case = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
+    write_case(case, tmp_path)
+    files = sorted(tmp_path.glob("*.xlsx"))
+    assert len(files) >= 3
+    for f in files:
+        for ws in load_workbook(f).worksheets:
+            text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+            assert "Представитель ООО «Тест»" in text and "/ П.П.Петров /" in text and "(Петров Пётр Петрович)" in text, \
+                f"{f.name}/{ws.title}"

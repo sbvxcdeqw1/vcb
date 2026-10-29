@@ -9,7 +9,8 @@ from .. import __version__
 from ..models import CAPREPAIR, CATEGORY_TITLES, CHARGE, OPENING, PAYMENT
 from ..money import fmt as money_fmt
 from .context import Case, CategoryResult
-from .xlsx_util import (BOLD, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, title_block, widths)
+from .xlsx_util import (LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, signature_block, title_block,
+                        widths)
 
 
 def _lines(case: Case, title: str, category: str) -> list[tuple[str, str]]:
@@ -26,12 +27,6 @@ def _lines(case: Case, title: str, category: str) -> list[tuple[str, str]]:
         lines.append((f"Общая площадь квартиры: {case.debtor.area} кв. м", "left"))
     lines.append(("", "gap"))
     return lines
-
-
-def _sign(ws, row: int, case: Case, label_col: str, sign_col: str):
-    who = case.claimant.short_name or case.claimant.name or "________"
-    put(ws, f"{label_col}{row}", f"Представитель {who}", align=LEFT)
-    put(ws, f"{sign_col}{row}", f"_____________ {case.representative.sign_name or '________'}")
 
 
 def _card_rows(case: Case, res: CategoryResult):
@@ -75,7 +70,7 @@ def write_debt_card(path, case: Case, res: CategoryResult):
         put(ws, f"{col}{r + 1}", None, border=True, fill=TOTAL_FILL)
     ws.merge_cells(f"A{r + 1}:D{r + 1}")
     put(ws, f"E{r + 1}", f"=D{r}-E{r}", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
-    _sign(ws, r + 4, case, "A", "D")
+    signature_block(ws, r + 4, case, ncols=3)
     has_reg = any(row[1] for row in _card_rows(case, res))
     widths(ws, {"A": 12, "B": 46 if has_reg else 14, "C": 26 if has_reg else 34, "D": 16, "E": 16})
     setup_print(ws, landscape=False, title_rows=f"{hdr}:{hdr}", footer_left=f"vcb {__version__}")
@@ -165,7 +160,7 @@ def write_penalty_card(path, case: Case, res: CategoryResult):
     put(ws, f"L{r}", f"=SUM(L{first_row}:L{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
     put(ws, f"A{r + 2}", f"Всего: {money_fmt(res.debt)} руб. (задолженность)", bold=True)
     put(ws, f"A{r + 3}", f"            {money_fmt(res.penalty)} руб. (пени)", bold=True)
-    _sign(ws, r + 6, case, "A", "J")
+    signature_block(ws, r + 6, case, ncols=3)
     widths(ws, {"A": 17, "B": 14, "C": 13, "D": 12, "E": 14, "F": 8, "G": 10, "H": 9, "I": 14, "J": 19, "K": 12,
                 "L": 14})
     setup_print(ws, landscape=True, title_rows=f"{hdr}:{hdr}", footer_left=f"vcb {__version__}")

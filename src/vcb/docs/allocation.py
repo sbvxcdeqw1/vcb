@@ -10,8 +10,8 @@ from ..money import fmt
 from ..parsers.payments import KIND_TITLES
 from .context import Case
 from .. import __version__
-from .xlsx_util import (BORDER, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, title_block,
-                        widths)
+from .xlsx_util import (BORDER, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, signature_block,
+                        title_block, widths)
 
 
 def write_allocation(path, case: Case, res):
@@ -58,6 +58,7 @@ def write_allocation(path, case: Case, res):
     put(ws, f"C{r}", f'=SUMIF(E{first_data}:E{r - 1},"да",C{first_data}:C{r - 1})', bold=True, border=True, fmt=MONEY)
     put(ws, f"A{r + 1}", "Итого не зачтено", bold=True, border=True)
     put(ws, f"C{r + 1}", f'=SUMIF(E{first_data}:E{r - 1},"нет",C{first_data}:C{r - 1})', bold=True, border=True, fmt=MONEY)
+    signature_block(ws, r + 4, case, ncols=5)
     widths(ws, {"A": 6, "B": 11, "C": 12, "D": 27, "E": 9, "F": 30, "G": 12, "H": 44, "I": 22, "J": 60})
     ws.freeze_panes = ws.cell(first_data, 1)
     setup_print(ws, landscape=True, title_rows=f"{hdr}:{hdr}", footer_left=f"vcb {__version__}")
@@ -74,6 +75,7 @@ def write_allocation(path, case: Case, res):
             border=True, align=LEFT)
         put(w2, f"E{r}", ln.debt, border=True, fmt=MONEY)
         put(w2, f"F{r}", "да" if id(ln) in included else "нет (давность / вне периода / остаток)", border=True)
+    signature_block(w2, len(res.all_lines) + 4, case, ncols=3)
     widths(w2, {"A": 20, "B": 13, "C": 12, "D": 70, "E": 13, "F": 34})
     w2.freeze_panes = "A2"
     setup_print(w2, landscape=True, title_rows="1:1", footer_left=f"vcb {__version__}")
@@ -90,6 +92,7 @@ def write_allocation(path, case: Case, res):
     put(w3, f"B{n}", res.debt, bold=True, border=True, fmt=MONEY)
     put(w3, f"C{n}", res.penalty, bold=True, border=True, fmt=MONEY)
     put(w3, f"D{n}", f"=B{n}+C{n}", bold=True, border=True, fmt=MONEY)
+    signature_block(w3, n + 3, case, ncols=2)
     widths(w3, {"A": 62, "B": 15, "C": 15, "D": 15})
     setup_print(w3, landscape=False, footer_left=f"vcb {__version__}")
     wb.save(path)

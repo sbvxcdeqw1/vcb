@@ -1,4 +1,5 @@
 """Оформление xlsx: единый шрифт, шапки, печать на A4 (поля, повтор заголовков, нумерация страниц)."""
+from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.page import PageMargins
 from openpyxl.worksheet.pagebreak import Break
@@ -94,3 +95,26 @@ def setup_print(ws, *, landscape: bool, title_rows: str | None = None, title_col
 def printable(ws, landscape=True):
     """Совместимость: простая печать на A4 по ширине."""
     setup_print(ws, landscape=landscape)
+
+
+def signature_block(ws, row: int, case, ncols: int = 3) -> int:
+    """Поле подписи под таблицей: должность и организация, линия для подписи с расшифровкой, ФИО представителя
+    (как заданы в окне программы), дата. Блок занимает `ncols` левых столбцов. Возвращает следующую свободную строку."""
+    org = case.claimant.short_name or case.claimant.name or "____________________"
+    rep = case.representative
+    who = "Представитель" if (rep.name or rep.sign_name) else "Взыскатель"
+    sign = rep.sign_name or rep.name or case.claimant.sign_name or "____________"
+    last = get_column_letter(ncols)
+    rows = [(f"{who} {org}", Font(name=FONT_NAME, size=10, bold=True), 28),
+            (f"_____________________ / {sign} /", NORMAL, 20),
+            ((f"(подпись)          ({rep.name})" if rep.name else "(подпись)          (расшифровка)"),
+             Font(name=FONT_NAME, size=8, italic=True, color="666666"), 14),
+            ("Дата: «____» ______________ 20____ г.", NORMAL, 18)]
+    for i, (text, font, height) in enumerate(rows):
+        r = row + i
+        ws.merge_cells(f"A{r}:{last}{r}")
+        c = ws[f"A{r}"]
+        c.value, c.font = text, font
+        c.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+        ws.row_dimensions[r].height = height
+    return row + len(rows)

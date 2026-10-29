@@ -16,7 +16,7 @@ from .. import __version__
 from ..models import CHARGE, OPENING, PAYMENT
 from .context import Case
 from .xlsx_util import (BORDER, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print,
-                        title_block, widths)
+                        signature_block, title_block, widths)
 
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
           "Декабрь"]
@@ -134,6 +134,7 @@ def _grid(ws, case, entries, services, start: tuple[int, int], end: tuple[int, i
     merges.append(dict(start_row=rt, start_column=1, end_row=rt, end_column=2))
     for c in [3] + [v for v in colmap.values()] + [tot_c, tot_p, close]:
         put(ws, f"{L(c)}{rt}", f"=SUM({L(c)}{r0}:{L(c)}{rt - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
+    signature_block(ws, rt + 3, case, ncols=3)
     widths(ws, {"A": 28, "B": 2, "C": 12.5, **{L(c): 10.5 for c in range(4, close + 1)}})
     widths(ws, {L(tot_c): 12, L(tot_p): 12, L(tot_p + 1): 1.5, L(close): 13})
     for mg in merges:
