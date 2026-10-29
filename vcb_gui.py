@@ -196,7 +196,9 @@ class App:
         self.ctk = ctk
         ctk.set_appearance_mode("dark")
         self.win = ctk.CTk(fg_color=COLORS["bg"])
-        self.win.title("vcb — заявления в суд и расчёты по ЖКУ")
+        from vcb import __version__  # noqa: PLC0415
+
+        self.win.title(f"vcb {__version__} — заявления в суд и расчёты по ЖКУ")
         self.win.geometry("1040x860")
         self.win.minsize(900, 680)
         from vcb.config import DATA, ROOT  # noqa: PLC0415

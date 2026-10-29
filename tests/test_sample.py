@@ -204,3 +204,14 @@ def test_gui_builds_cli_arguments():
         vcb_gui.build_argv({"source": ""})
     with pytest.raises(ValueError):
         vcb_gui.build_argv({"source": "a", "as_of": "31/12"})
+
+
+def test_version_is_consistent():
+    import re
+
+    import vcb
+
+    pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text(encoding="utf-8")
+    assert re.search(rf'^version = "{re.escape(vcb.__version__)}"', pyproject, flags=re.M)
+    changelog = (Path(__file__).parent.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert f"## {vcb.__version__} " in changelog

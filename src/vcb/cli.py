@@ -6,6 +6,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from . import __version__
 from .config import DATA, load_config
 from .court.registry import CourtRegistry
 from .debtors import read_registry
@@ -47,6 +48,7 @@ def main(argv=None):
 
 def run(argv):
     ap = argparse.ArgumentParser(prog="vcb", description="Заявления в суд и карточки расчёта по ЖКУ из выгрузок 1С")
+    ap.add_argument("--version", action="version", version=f"vcb {__version__}")
     ap.add_argument("input", help="выгрузка 1С (xls/xlsx) или папка с выгрузками (пакетный режим)")
     ap.add_argument("-o", "--out", default="out", help="папка результата")
     ap.add_argument("-r", "--registry", help="реестр должников (csv/xlsx): набор полей по каждому должнику")
