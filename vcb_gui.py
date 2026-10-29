@@ -36,14 +36,21 @@ def ensure_dependencies() -> None:
         return
     root = tk.Tk()
     root.withdraw()
+    note = ""
+    if sys.version_info >= (3, 14):
+        note = (f"\n\nВнимание: у вас Python {sys.version_info.major}.{sys.version_info.minor} - для такой новой версии "
+                "у части библиотек (lxml, pyyaml) ещё нет готовых сборок, установка может не пройти. "
+                "Надёжнее поставить Python 3.12 или 3.13 с python.org.")
     if not messagebox.askyesno("vcb", "Для работы нужны библиотеки:\n  " + ", ".join(missing) +
-                               "\n\nУстановить сейчас? (нужен интернет, займёт около минуты)"):
+                               "\n\nУстановить сейчас? (нужен интернет, займёт около минуты)" + note):
         raise SystemExit(1)
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
-    except Exception as e:  # noqa: BLE001
-        messagebox.showerror("vcb", f"Не удалось установить библиотеки:\n{e}\n\nУстановите вручную:\n"
-                                    f"pip install {' '.join(missing)}")
+    proc = subprocess.run([sys.executable, "-m", "pip", "install", *missing], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stdout + "\n" + proc.stderr).strip().splitlines()[-12:])
+        messagebox.showerror("vcb", "Не удалось установить библиотеки.\n\nПоследние строки отчёта pip:\n" + tail +
+                             "\n\nЧто делать: установите Python 3.12 или 3.13 (python.org) и запустите программу им. "
+                             "Либо выполните вручную:\npip install " + " ".join(missing))
         raise SystemExit(1)
     root.destroy()
 
