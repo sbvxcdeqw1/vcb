@@ -188,3 +188,19 @@ def test_full_pipeline_reproduces_sample_with_default_config():
     c = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
     res = c.results[SERVICES]
     assert (res.debt, res.penalty) == (Decimal("24805.47"), Decimal("4351.96"))
+
+
+def test_gui_builds_cli_arguments():
+    pytest.importorskip("tkinter")
+    import vcb_gui
+
+    argv = vcb_gui.build_argv({"source": "a.xls", "out": "o", "region": "perm_krai", "payments": "p.xlsx",
+                               "as_of": "13.04.2026", "period_from": "01.10.2023", "doc": "claim"})
+    assert argv[:2] == ["a.xls", "-o"] and "--no-interactive" in argv
+    assert argv[argv.index("--as-of") + 1] == "2026-04-13"
+    assert argv[argv.index("--period-from") + 1] == "2023-10-01" and "--period-to" not in argv
+    assert argv[argv.index("--payments") + 1] == "p.xlsx" and argv[argv.index("--doc") + 1] == "claim"
+    with pytest.raises(ValueError):
+        vcb_gui.build_argv({"source": ""})
+    with pytest.raises(ValueError):
+        vcb_gui.build_argv({"source": "a", "as_of": "31/12"})
