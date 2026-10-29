@@ -215,3 +215,29 @@ def test_version_is_consistent():
     assert re.search(rf'^version = "{re.escape(vcb.__version__)}"', pyproject, flags=re.M)
     changelog = (Path(__file__).parent.parent / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## {vcb.__version__} " in changelog
+
+
+def test_typography_and_print_setup(tmp_path):
+    from openpyxl import load_workbook
+
+    from vcb.config import load_config
+    from vcb.docs.claim import NBSP, typo
+    from vcb.models import Party
+    from vcb.pipeline import build_case, write_case
+
+    assert typo("24 805,47 руб. по ст. 155 № 5, д. 180") == f"24{NBSP}805,47{NBSP}руб. по ст.{NBSP}155 №{NBSP}5, д.{NBSP}180"
+    if not SAMPLE.exists():
+        return
+    prof = {"claimant": Party(), "representative": Party(), "legal": {}}
+    case = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
+    write_case(case, tmp_path)
+    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка.xlsx", True)):
+        ws = load_workbook(tmp_path / name).worksheets[0]
+        assert ws.page_setup.paperSize == 9 and (ws.page_setup.orientation == "landscape") == landscape
+        assert ws.print_title_rows
+    import docx
+
+    doc = docx.Document(next(tmp_path.glob("*.docx")))
+    sec = doc.sections[0]
+    assert round(sec.left_margin.cm, 1) == 3.0 and round(sec.right_margin.cm, 1) == 1.0
+    assert doc.styles["Normal"].font.size.pt == 14 and doc.styles["Normal"].font.name == "Times New Roman"

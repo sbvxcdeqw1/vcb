@@ -9,7 +9,9 @@ from openpyxl import Workbook
 from ..money import fmt
 from ..parsers.payments import KIND_TITLES
 from .context import Case
-from .xlsx_util import *
+from .. import __version__
+from .xlsx_util import (BORDER, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, title_block,
+                        widths)
 
 
 def write_allocation(path, case: Case, res):
@@ -24,14 +26,16 @@ def write_allocation(path, case: Case, res):
     wb = Workbook()
     ws = wb.active
     ws.title = "Оплаты"
-    put(ws, "A1", f"Разноска оплат — {case.debtor.fio or case.account.owner}, ЛС {case.account.number}", bold=True)
-    put(ws, "A2", "Оплата идёт на период из назначения платежа, остаток и оплаты без периода — на самые ранние долги; "
-                  "платежи по исполнительному производству в зачёт не берутся.")
-    heads = ["№", "Дата", "Сумма", "Тип платежа", "Зачтено", "Основание", "Период по назначению", "Разнесено на",
-             "Примечание", "Назначение платежа"]
-    for i, t in enumerate(heads, 1):
-        put(ws, ws.cell(4, i).coordinate, t, bold=True, border=True, align=CENTER)
-    r = 5
+    org = case.claimant.short_name or case.claimant.name
+    hdr = title_block(ws, 10, ([(org, "org")] if org else []) + [
+        ("РАЗНОСКА ОПЛАТ", "title"),
+        (f"{case.debtor.fio or case.account.owner}, лицевой счёт {case.account.number}", "center"),
+        ("Оплата идёт на период из назначения платежа, остаток и оплаты без периода — на самые ранние долги; "
+         "платежи по исполнительному производству в зачёт не берутся.", "left"), ("", "gap")], width_chars=150)
+    header_row(ws, hdr, ["№", "Дата", "Сумма, руб.", "Тип платежа", "Зачтено", "Основание", "Период по назначению",
+                         "Разнесено на", "Примечание", "Назначение платежа"], height=32)
+    first_data = hdr + 1
+    r = first_data
     for p in sorted(case.payments, key=lambda p: (p.date, p.ref)):
         parts = refs.get(p.ref, [])
         put(ws, f"A{r}", p.ref, border=True)
@@ -48,19 +52,19 @@ def write_allocation(path, case: Case, res):
             where = "не учтена: вне расчётного периода"
         put(ws, f"H{r}", where if p.include else "—", border=True, align=LEFT)
         put(ws, f"I{r}", "; ".join(p.flags), border=True, align=LEFT)
-        put(ws, f"J{r}", p.info[:300], border=True, align=LEFT)
+        put(ws, f"J{r}", p.info[:160] + ("…" if len(p.info) > 160 else ""), border=True, align=LEFT)
         r += 1
     put(ws, f"A{r}", "Итого зачтено", bold=True, border=True)
-    put(ws, f"C{r}", f'=SUMIF(E5:E{r - 1},"да",C5:C{r - 1})', bold=True, border=True, fmt=MONEY)
+    put(ws, f"C{r}", f'=SUMIF(E{first_data}:E{r - 1},"да",C{first_data}:C{r - 1})', bold=True, border=True, fmt=MONEY)
     put(ws, f"A{r + 1}", "Итого не зачтено", bold=True, border=True)
-    put(ws, f"C{r + 1}", f'=SUMIF(E5:E{r - 1},"нет",C5:C{r - 1})', bold=True, border=True, fmt=MONEY)
-    widths(ws, {"A": 7, "B": 12, "C": 12, "D": 24, "E": 9, "F": 34, "G": 12, "H": 48, "I": 28, "J": 70})
-    ws.freeze_panes = "A5"
-    printable(ws, landscape=True)
+    put(ws, f"C{r + 1}", f'=SUMIF(E{first_data}:E{r - 1},"нет",C{first_data}:C{r - 1})', bold=True, border=True, fmt=MONEY)
+    widths(ws, {"A": 6, "B": 11, "C": 12, "D": 27, "E": 9, "F": 30, "G": 12, "H": 44, "I": 22, "J": 60})
+    ws.freeze_panes = ws.cell(first_data, 1)
+    setup_print(ws, landscape=True, title_rows=f"{hdr}:{hdr}", footer_left=f"vcb {__version__}")
 
     w2 = wb.create_sheet("Начисления")
-    for i, t in enumerate(["Начисление", "Срок оплаты", "Сумма", "Погашено оплатами", "Остаток долга", "В заявлении"], 1):
-        put(w2, w2.cell(1, i).coordinate, t, bold=True, border=True, align=CENTER)
+    header_row(w2, 1, ["Начисление", "Срок оплаты", "Сумма, руб.", "Погашено оплатами", "Остаток долга, руб.",
+                       "В заявлении"])
     included = {id(ln) for ln in res.lines}
     for r, ln in enumerate(res.all_lines, 2):
         put(w2, f"A{r}", ln.label, border=True)
@@ -72,10 +76,10 @@ def write_allocation(path, case: Case, res):
         put(w2, f"F{r}", "да" if id(ln) in included else "нет (давность / вне периода / остаток)", border=True)
     widths(w2, {"A": 20, "B": 13, "C": 12, "D": 70, "E": 13, "F": 34})
     w2.freeze_panes = "A2"
+    setup_print(w2, landscape=True, title_rows="1:1", footer_left=f"vcb {__version__}")
 
     w3 = wb.create_sheet("Сценарии")
-    for i, t in enumerate(["Вариант учёта оплат", "Долг", "Пени", "Итого"], 1):
-        put(w3, w3.cell(1, i).coordinate, t, bold=True, border=True, align=CENTER)
+    header_row(w3, 1, ["Вариант учёта оплат", "Долг, руб.", "Пени, руб.", "Итого, руб."], height=24)
     for r, (name, debt, pen) in enumerate(case.scenarios, 2):
         put(w3, f"A{r}", name, border=True)
         put(w3, f"B{r}", debt, border=True, fmt=MONEY)
@@ -86,5 +90,6 @@ def write_allocation(path, case: Case, res):
     put(w3, f"B{n}", res.debt, bold=True, border=True, fmt=MONEY)
     put(w3, f"C{n}", res.penalty, bold=True, border=True, fmt=MONEY)
     put(w3, f"D{n}", f"=B{n}+C{n}", bold=True, border=True, fmt=MONEY)
-    widths(w3, {"A": 58, "B": 14, "C": 14, "D": 14})
+    widths(w3, {"A": 62, "B": 15, "C": 15, "D": 15})
+    setup_print(w3, landscape=False, footer_left=f"vcb {__version__}")
     wb.save(path)
