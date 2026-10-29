@@ -1,6 +1,7 @@
 # Справочник судов и подсудности. Собран tools/build_courts.py из sudinforf.ru (агрегатор, не закон).
 # Перед подачей сверяйте границы участков с законом субъекта (для Пермского края - Закон 453-ПК и изменения).
-default_city: Пермь
+region_name: Пермский край
+default_city: Пермь   # если в выгрузке адрес без города
 courts:
 - id: d-aleksandrovskij-gorodskoj-sud-permskogo-kraya
   level: district

@@ -160,7 +160,7 @@ def main(cache: str, out: str, manual: str | None = None):
     Path(out).write_text(
         "# Справочник судов и подсудности. Собран tools/build_courts.py из sudinforf.ru (агрегатор, не закон).\n"
         "# Перед подачей сверяйте границы участков с законом субъекта (для Пермского края - Закон 453-ПК и изменения).\n"
-        + yaml.safe_dump({"default_city": "Пермь", "courts": courts}, allow_unicode=True, sort_keys=False, width=200),
+        + yaml.safe_dump({"region_name": "Пермский край", "default_city": "Пермь", "courts": courts}, allow_unicode=True, sort_keys=False, width=200),
         encoding="utf-8")
     print(f"судов: {len(courts) - n_ms}, участков: {n_ms}, из них со списком улиц: {n_struct}")
 
