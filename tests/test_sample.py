@@ -317,3 +317,6 @@ def test_chess_plus_register_pipeline(tmp_path):
     ws = load_workbook(tmp_path / "Карточка_расчета_ЖКУ.xlsx").worksheets[0]
     heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
     assert "Задолженность, руб." in heads
+    text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
+    assert "Сальдо на" not in text and "не вошедшие" not in text
+    assert f"Задолженность на {as_of:%d.%m.%Y}" in text

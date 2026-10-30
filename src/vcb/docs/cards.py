@@ -41,20 +41,14 @@ def write_calc_card(path, case: Case, res: CategoryResult):
     hdr = title_block(ws, 6, lines)
     header_row(ws, hdr, ["Дата", "Регистратор", "Операция", "Начислено, руб.", "Оплата, руб.", "Задолженность, руб."])
     r = hdr + 1
-    put(ws, f"A{r}", f"Сальдо на {case.period_from:%d.%m.%Y}", bold=True, border=True, fill=TOTAL_FILL)
-    for col in "BCDE":
-        put(ws, f"{col}{r}", None, border=True, fill=TOTAL_FILL)
-    ws.merge_cells(f"A{r}:E{r}")
-    put(ws, f"F{r}", 0, bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
-    start = r + 1
-    r = start
+    start = r
     for when, registrar, purpose, charged, paid in res.card_rows:
         put(ws, f"A{r}", when, border=True, fmt="DD.MM.YYYY", align=LEFT)
         put(ws, f"B{r}", registrar, border=True, align=LEFT)
         put(ws, f"C{r}", purpose, border=True, align=LEFT)
         put(ws, f"D{r}", charged or None, border=True, fmt=MONEY)
         put(ws, f"E{r}", paid or None, border=True, fmt=MONEY)
-        put(ws, f"F{r}", f"=F{r - 1}+D{r}-E{r}", border=True, fmt=MONEY)
+        put(ws, f"F{r}", f"=F{r - 1}+D{r}-E{r}" if r > start else f"=D{r}-E{r}", border=True, fmt=MONEY)
         r += 1
     put(ws, f"A{r}", "Обороты за период", bold=True, border=True, fill=TOTAL_FILL)
     for col in "BC":
@@ -63,24 +57,12 @@ def write_calc_card(path, case: Case, res: CategoryResult):
     put(ws, f"D{r}", f"=SUM(D{start}:D{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
     put(ws, f"E{r}", f"=SUM(E{start}:E{r - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
     put(ws, f"F{r}", None, border=True, fill=TOTAL_FILL)
-    put(ws, f"A{r + 1}", f"Сальдо на {case.as_of:%d.%m.%Y}", bold=True, border=True, fill=TOTAL_FILL)
+    put(ws, f"A{r + 1}", f"Задолженность на {case.as_of:%d.%m.%Y}", bold=True, border=True, fill=TOTAL_FILL)
     for col in "BCDE":
         put(ws, f"{col}{r + 1}", None, border=True, fill=TOTAL_FILL)
     ws.merge_cells(f"A{r + 1}:E{r + 1}")
-    put(ws, f"F{r + 1}", f"=F{r - 1}" if r > start else "=F" + str(start - 1), bold=True, border=True, fmt=MONEY,
-        fill=TOTAL_FILL)
+    put(ws, f"F{r + 1}", f"=F{r - 1}" if r > start else 0, bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
     nxt = r + 3
-    if res.skipped:
-        put(ws, f"A{nxt}", "Платежи реестра, не вошедшие в расчёт:", bold=True, size=9)
-        nxt += 1
-        for when, amount, why in sorted(res.skipped)[:25]:
-            ws.merge_cells(f"A{nxt}:F{nxt}")
-            put(ws, f"A{nxt}", f"{when:%d.%m.%Y}  {money_fmt(amount)} руб. — {why}", size=9, align=LEFT)
-            nxt += 1
-        if len(res.skipped) > 25:
-            put(ws, f"A{nxt}", f"… и ещё {len(res.skipped) - 25}", size=9)
-            nxt += 1
-        nxt += 1
     signature_block(ws, nxt + 1, case, ncols=3)
     widths(ws, {"A": 12, "B": 36, "C": 24, "D": 15, "E": 15, "F": 17})
     setup_print(ws, landscape=False, title_rows=f"{hdr}:{hdr}", footer_left=f"vcb {__version__}")
