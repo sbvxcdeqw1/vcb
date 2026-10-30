@@ -231,7 +231,7 @@ def test_typography_and_print_setup(tmp_path):
     prof = {"claimant": Party(), "representative": Party(), "legal": {}}
     case = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
     write_case(case, tmp_path)
-    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат.xlsx", True)):
+    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат.xlsx", False)):
         ws = load_workbook(tmp_path / name).worksheets[0]
         assert ws.page_setup.paperSize == 9 and (ws.page_setup.orientation == "landscape") == landscape
         assert ws.print_title_rows

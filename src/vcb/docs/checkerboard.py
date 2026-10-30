@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict, defaultdict
+from functools import partial
 from datetime import date
 from decimal import Decimal
 
@@ -15,6 +16,7 @@ from openpyxl.utils import get_column_letter as L
 from .. import __version__
 from ..models import CHARGE, OPENING, PAYMENT
 from .context import Case
+from .xlsx_util import put as _put
 from .xlsx_util import (BORDER, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print,
                         signature_block, title_block, widths)
 
@@ -43,6 +45,7 @@ def write_checkerboard(path, case: Case):
 
 
 def _grid(ws, case, entries, services, start: tuple[int, int], end: tuple[int, int], kind: str = "year"):
+    put = partial(_put, size=9)  # таблица шахматки набрана 9 пт: на вертикальной странице помещается больше месяцев
     start_d = date(*start, 1)
     months = []
     y, m = start
@@ -136,22 +139,24 @@ def _grid(ws, case, entries, services, start: tuple[int, int], end: tuple[int, i
     for c in [3] + [v for v in colmap.values()] + [tot_c, tot_p, close]:
         put(ws, f"{L(c)}{rt}", f"=SUM({L(c)}{r0}:{L(c)}{rt - 1})", bold=True, border=True, fmt=MONEY, fill=TOTAL_FILL)
     signature_block(ws, rt + 3, case, ncols=3)
-    widths(ws, {"A": 28, "B": 2, "C": 12.5, **{L(c): 10.5 for c in range(4, close + 1)}})
-    widths(ws, {L(tot_c): 12, L(tot_p): 12, L(tot_p + 1): 1.5, L(close): 13})
+    widths(ws, {"A": 26, "B": 2, "C": 11, **{L(c): 9.2 for c in range(4, close + 1)}})
+    widths(ws, {L(tot_c): 11, L(tot_p): 11, L(tot_p + 1): 1.5, L(close): 11.5})
     for mg in merges:
         ws.merge_cells(**mg)
     ws.freeze_panes = ws.cell(sub + 1, 4)
-    if kind == "full":  # весь период: страница = полугодие, слева повторяются «Услуга» и «Начальный остаток»
-        halves = [(y, m) for y, m in months if m in (1, 7)]
-        breaks = tuple(colmap[(y, m, "c")] - 1 for y, m in halves[1:]) + (tot_c - 1,)
-        per_half: dict = {}
-        for (y, m, _k), c_ in colmap.items():
-            key = (y, m > 6)
-            per_half[key] = per_half.get(key, 0) + 1
-        # ширина столбца Excel ≈ 0,2 см; рабочая ширина A4 в альбомной ориентации ≈ 27 см
-        widest = (30 + 12.5 + max(per_half.values()) * 10.5) * 0.2
-        scale = max(60, min(100, int(27.0 / widest * 100) // 5 * 5))
-        setup_print(ws, landscape=True, title_rows=f"{top}:{sub}", title_cols="A:C", fit_width=False, scale=scale,
-                    col_breaks=breaks, footer_left=f"vcb {__version__}")
-    else:  # один год: весь лист на одной странице по ширине
-        setup_print(ws, landscape=True, title_rows=f"{top}:{sub}", footer_left=f"vcb {__version__}")
+    # Печать: A4 вертикально, масштаб 85%. Слева на каждой странице повторяются «Услуга» и «Остаток на начало»,
+    # месяцы (с их столбцом «Оплата») укладываются на страницу целиком, итоги - на последней странице.
+    scale = 88
+    page_cm = 21.0 - 1.5 - 1.0  # ширина A4 минус поля слева (1,5) и справа (1,0), см
+    avail = page_cm / (scale / 100) - sum(ws.column_dimensions[L(c)].width for c in (1, 2, 3)) * 0.2
+    groups = [[colmap[(y, m, k)] for k in ("c", "p") if (y, m, k) in colmap] for y, m in months]
+    groups.append([tot_c, tot_p, tot_p + 1, close])
+    breaks, used = [], 0.0
+    for g in groups:
+        w = sum(ws.column_dimensions[L(c)].width for c in g) * 0.2
+        if used and used + w > avail:
+            breaks.append(g[0] - 1)
+            used = 0.0
+        used += w
+    setup_print(ws, landscape=False, title_rows=f"{top}:{sub}", title_cols="A:C", fit_width=False, scale=scale,
+                col_breaks=tuple(breaks), footer_left=f"vcb {__version__}")
