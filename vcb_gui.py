@@ -85,7 +85,8 @@ def build_argv(v: dict) -> list[str]:
         "-o", v.get("out") or "out", "--no-interactive", "--region", v.get("region") or "perm_krai"]
     if v.get("cap_source"):
         argv += ["--cap-input", v["cap_source"]]
-    for key, flag in (("cap_payments", "--cap-payments"), ("cap_exclude_services", "--cap-exclude-services")):
+    for key, flag in (("cap_payments", "--cap-payments"), ("cap_exclude_services", "--cap-exclude-services"),
+                      ("cap_overrides", "--cap-payment-overrides")):
         if v.get(key):
             argv += [flag, v[key]]
     for key, flag in (("payments", "--payments"), ("registry", "--registry"), ("profile", "--profile"),
@@ -479,8 +480,19 @@ class App:
                                 justify="left", wraplength=860)
         svc_grid = ctk.CTkFrame(tab, fg_color="transparent")
         svc_btns = ctk.CTkFrame(tab, fg_color="transparent")
+        pays_hint = ctk.CTkLabel(tab, text="", text_color=COLORS["muted"], anchor="w", justify="left", wraplength=860)
+        pays_list = ctk.CTkScrollableFrame(tab, height=240, corner_radius=12, fg_color=COLORS["card"], border_width=1,
+                                           border_color=COLORS["line"])
+        pays_btns = ctk.CTkFrame(tab, fg_color="transparent")
         self.pk[key] = {"single": single, "batch": batch, "pay": pay_holder, "hint": svc_hint, "grid": svc_grid,
-                        "btns": svc_btns, "vars": {}, "names": {}, "job": None}
+                        "btns": svc_btns, "vars": {}, "names": {}, "job": None, "pays_hint": pays_hint,
+                        "pays_list": pays_list, "pays_btns": pays_btns, "pays": [], "manual": {}, "pjob": None}
+        for text, mode in (("Зачесть все", "all"), ("Не зачитывать все", "none"), ("Как решила программа", "auto")):
+            ctk.CTkButton(pays_btns, text=text, height=30, corner_radius=10, fg_color=COLORS["field"],
+                          hover_color=COLORS["line"], border_width=1, border_color=COLORS["line"], width=170,
+                          command=lambda m=mode, k=key: self.set_all_payments(k, m)).pack(side="left", padx=4)
+        for pkey in (f"{key}.payments", f"{key}.source_file"):
+            self.vars[pkey].trace_add("write", lambda *a, k=key: self._schedule_payments(k))
         for text, val in (("Отметить все", True), ("Снять все", False)):
             ctk.CTkButton(svc_btns, text=text, height=30, corner_radius=10, fg_color=COLORS["field"],
                           hover_color=COLORS["line"], border_width=1, border_color=COLORS["line"], width=130,
@@ -491,7 +503,8 @@ class App:
                 "write", lambda *a, k=key: self._schedule_services(k))
         single.pack(fill="x")
         pay_holder.pack(fill="x")
-        svc_hint.pack(fill="x", padx=8, pady=(8, 2))
+        pays_hint.pack(fill="x", padx=8, pady=(6, 2))
+        svc_hint.pack(fill="x", padx=8, pady=(12, 2))
         svc_grid.pack(fill="x")
         svc_btns.pack(fill="x", pady=(6, 0))
 
@@ -505,12 +518,121 @@ class App:
                 pk["single"].pack_forget()
                 pk["batch"].pack(fill="x", before=pk["pay"])
             self.refresh_services(key)
+            self.refresh_payments(key)
         if single:
             self.batch_extra.pack_forget()
             self.debtor_card.pack(fill="x", padx=6, pady=7, before=self.claimant_card)
         else:
             self.batch_extra.pack(fill="x")
             self.debtor_card.pack_forget()
+
+    # ---- платежи реестра: ручной зачёт
+    def _schedule_payments(self, key: str):
+        pk = self.pk[key]
+        if pk["pjob"]:
+            self.win.after_cancel(pk["pjob"])
+        pk["pjob"] = self.win.after(600, lambda: self.refresh_payments(key))
+
+    @staticmethod
+    def _show_pays(pk: dict, show: bool):
+        for w in (pk["pays_list"], pk["pays_btns"]):
+            w.pack_forget()
+        if show:
+            pk["pays_list"].pack(fill="x", padx=6, before=pk["hint"])
+            pk["pays_btns"].pack(fill="x", pady=(6, 4), before=pk["hint"])
+
+    def refresh_payments(self, key: str):
+        """Читает платежи реестра, показывает решение программы и даёт поставить/снять галочку «в зачёт»."""
+        from vcb.config import load_config  # noqa: PLC0415
+        from vcb.money import fmt  # noqa: PLC0415
+        from vcb.parsers.onec import parse_any  # noqa: PLC0415
+        from vcb.parsers.payments import KIND_TITLES, classify, filter_by_account, parse_registers  # noqa: PLC0415
+
+        pk = self.pk[key]
+        pk["pjob"] = None
+        for w in pk["pays_list"].winfo_children():
+            w.destroy()
+        pk["pays"] = []
+        single = self.mode.get() == "Один должник"
+        path = self.vars[f"{key}.payments"].get().strip()
+        if not single:
+            pk["pays_hint"].configure(text="В пакетном режиме платежи отбирает программа (исполнительное производство "
+                                           "не зачитывается). Ручной выбор платежей — в режиме «Один должник».")
+            self._show_pays(pk, False)
+            return
+        if not path or not Path(path).exists():
+            pk["pays_hint"].configure(text="Выберите реестр оплат — здесь появятся его платежи; программа сама решит, "
+                                           "какие зачесть, а вы сможете исправить это галочками.")
+            self._show_pays(pk, False)
+            return
+        try:
+            pays = parse_registers(path)
+            chess = self.vars[f"{key}.source_file"].get().strip()
+            number = parse_any(chess).number if chess and Path(chess).is_file() else ""
+            pays, _ = filter_by_account(pays, number)
+            classify(pays, load_config())
+        except Exception as e:  # noqa: BLE001
+            pk["pays_hint"].configure(text=f"Не удалось прочитать реестр оплат: {e}")
+            self._show_pays(pk, False)
+            return
+        self._show_pays(pk, True)
+        seen: dict[tuple, int] = {}
+        for p in pays:
+            k2 = (p.date, p.amount)
+            seen[k2] = seen.get(k2, 0) + 1
+            n = seen[k2]
+            default = p.include
+            var = tk.BooleanVar(value=pk["manual"].get((p.date, p.amount, n), default))
+            var.trace_add("write", lambda *a, k=key: self._update_pay_summary(k))
+            row = self.ctk.CTkFrame(pk["pays_list"], fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            self.ctk.CTkCheckBox(row, text=f"{p.date:%d.%m.%Y}   {fmt(p.amount):>13} ₽   ·   {KIND_TITLES[p.kind]}",
+                                 variable=var, corner_radius=6, checkmark_color="#ffffff", fg_color=COLORS["accent"],
+                                 border_color=COLORS["line"], text_color=COLORS["text"]).pack(anchor="w")
+            self.ctk.CTkLabel(row, text=p.info[:110], text_color=COLORS["muted"], anchor="w", justify="left",
+                              font=self.ctk.CTkFont(size=11)).pack(fill="x", padx=34)
+            pk["pays"].append({"payment": p, "var": var, "default": default, "n": n})
+        self._update_pay_summary(key)
+
+    def _update_pay_summary(self, key: str):
+        from vcb.money import fmt  # noqa: PLC0415
+
+        pk = self.pk[key]
+        rows = pk["pays"]
+        if not rows:
+            return
+        on = [r for r in rows if r["var"].get()]
+        changed = sum(1 for r in rows if r["var"].get() != r["default"])
+        total = sum((r["payment"].amount for r in rows), Decimal(0))
+        zach = sum((r["payment"].amount for r in on), Decimal(0))
+        for r in rows:
+            p = r["payment"]
+            pk["manual"][(p.date, p.amount, r["n"])] = r["var"].get()
+        pk["pays_hint"].configure(text=(
+            f"Платежей в реестре: {len(rows)} на {fmt(total)} ₽. В зачёт: {len(on)} на {fmt(zach)} ₽. "
+            + (f"Изменено вручную: {changed}. " if changed else "Решение программы не менялось. ")
+            + "Платежи вне расчётного периода в расчёт не входят, даже если отмечены."))
+
+    def set_all_payments(self, key: str, mode: str):
+        for r in self.pk[key]["pays"]:
+            r["var"].set(r["default"] if mode == "auto" else mode == "all")
+        if mode == "auto":
+            self.pk[key]["manual"].clear()
+
+    def payment_overrides_csv(self, key: str, folder: Path) -> str:
+        """Решения оператора, отличающиеся от решения программы, - в csv для `--payment-overrides`."""
+        rows = [r for r in self.pk[key]["pays"] if r["var"].get() != r["default"]]
+        if not rows:
+            return ""
+        path = folder / f"overrides_{key}.csv"
+        with open(path, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f, delimiter=";")
+            w.writerow(["дата", "сумма", "решение", "комментарий", "номер"])
+            for r in rows:
+                p = r["payment"]
+                w.writerow([f"{p.date:%d.%m.%Y}", str(p.amount), "зачесть" if r["var"].get() else "исключить",
+                            "вручную в окне", r["n"]])
+        return str(path)
 
     # ---- услуги шахматки
     def _schedule_services(self, key: str):
@@ -629,18 +751,23 @@ class App:
                 packs[key] = (src, pay, self.excluded_services(key), title)
             if not packs:
                 raise ValueError("укажите шахматку ЖКУ и/или шахматку капитального ремонта")
-            missing = [t for _, (_, pay, _, t) in packs.items() if not pay]
+            missing = [v_[3] for v_ in packs.values() if not v_[1]]
             if missing and not messagebox.askyesno(
                     "vcb", "Не выбран реестр оплат: " + ", ".join(missing) + ".\n\nОплаты по этому пакету будут взяты "
                            "из самой шахматки — без назначения платежа и без отбора платежей по исполнительному "
                            "производству. Продолжить?"):
                 return
+            if single:
+                for key in packs:
+                    ov = self.payment_overrides_csv(key, tmp)
+                    packs[key] = (*packs[key][:3], packs[key][3], ov)
             gku, kr = packs.get("gku"), packs.get("kr")
             source = (gku or kr)[0]
+            ov = lambda t: t[4] if t and len(t) > 4 else ""
             v = {"source": gku[0] if gku else "", "payments": gku[1] if gku else "",
-                 "exclude_services": gku[2] if gku else "",
+                 "exclude_services": gku[2] if gku else "", "overrides": ov(gku),
                  "cap_source": kr[0] if kr else "", "cap_payments": kr[1] if kr else "",
-                 "cap_exclude_services": kr[2] if kr else "",
+                 "cap_exclude_services": kr[2] if kr else "", "cap_overrides": ov(kr),
                  "out": self.vars["out"].get().strip(),
                  "as_of": self.vars["par.as_of"].get(), "period_from": self.vars["par.period_from"].get(),
                  "period_to": self.vars["par.period_to"].get(),

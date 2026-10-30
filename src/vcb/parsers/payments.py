@@ -89,18 +89,26 @@ def classify(payments: list[Payment], cfg: dict) -> None:
         p.reason = "обычная оплата"
 
 
-def apply_overrides(payments: list[Payment], path: str | Path) -> None:
-    """CSV (;): дата;сумма;решение(зачесть|исключить);комментарий - точечные решения по платежам."""
+def apply_overrides(payments: list[Payment], path: str | Path) -> int:
+    """CSV (;): дата;сумма;решение(зачесть|исключить);комментарий;номер - точечные решения по платежам.
+    Пятый столбец (необязателен) - порядковый номер среди платежей с той же датой и суммой (когда их несколько).
+    Возвращает число применённых решений."""
+    applied = 0
     for row in csv.reader(Path(path).read_text(encoding="utf-8-sig").splitlines(), delimiter=";"):
-        if not row or row[0].lower().startswith(("дата", "#")):
+        if not row or row[0].lower().startswith(("дата", "#")) or len(row) < 3:
             continue
         d = datetime.strptime(row[0].strip(), "%d.%m.%Y").date()
-        amt = D(row[1])
+        any_amount = row[1].strip() in ("*", "")
+        amt = None if any_amount else D(row[1])
         what = row[2].strip().lower()
-        for p in payments:
-            if p.date == d and (p.amount == amt or row[1].strip() in ("*", "")):
+        nth = int(row[4]) if len(row) > 4 and row[4].strip().isdigit() else None
+        same = [p for p in payments if p.date == d and (any_amount or p.amount == amt)]
+        for k, p in enumerate(same, 1):
+            if nth is None or nth == k:
                 p.include = what.startswith(("зачесть", "включ", "include"))
                 p.flags = [f for f in p.flags if not f.startswith("нужно")] + [f"решение вручную: {what}"]
+                applied += 1
+    return applied
 
 
 def parse_registers(path: str | Path) -> list[Payment]:

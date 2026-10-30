@@ -473,3 +473,44 @@ def test_real_caprepair_register_is_enforcement_only():
                       category=CAPREPAIR)
     assert paid.results[CAPREPAIR].debt == plain.results[CAPREPAIR].debt  # оплаты по ИП долг не уменьшают
     assert len(paid.results[CAPREPAIR].skipped) == len(pays)
+
+
+# ---------------------------------------------------------------- ручной зачёт платежей
+def make_register(path, rows):
+    """Минимальный реестр банковских документов: rows = [(дата 'дд.мм.гггг', сумма, информация)]."""
+    from openpyxl import Workbook
+
+    ws = Workbook().active
+    ws.append(["Дата", "Сумма", "Информация"])
+    for r in rows:
+        ws.append(list(r))
+    ws.parent.save(path)
+
+
+def test_manual_payment_overrides(tmp_path):
+    from vcb.config import load_config
+    from vcb.models import Party
+    from vcb.parsers.payments import apply_overrides, classify, parse_register
+
+    g, _ = two_packages(tmp_path)
+    reg = tmp_path / "reg.xlsx"
+    make_register(reg, [("10.07.2024", 1000, "оплата ЖКУ"), ("10.07.2024", 1000, "оплата ЖКУ"),
+                        ("20.08.2024", 500, "по исполнительному производству 123-ИП")])
+    pays = parse_register(reg)
+    classify(pays, load_config())
+    assert [p.include for p in pays] == [True, True, False]
+
+    ov = tmp_path / "ov.csv"
+    ov.write_text("дата;сумма;решение;комментарий;номер\n10.07.2024;1000;исключить;вручную;2\n"
+                  "20.08.2024;*;зачесть;вручную\n", encoding="utf-8-sig")
+    assert apply_overrides(pays, ov) == 2
+    assert [p.include for p in pays] == [True, False, True]  # номер выбирает вторую из одинаковых
+
+    from vcb.pipeline import build_case
+
+    prof = {"claimant": Party(short_name="ООО «Тест»"), "representative": Party(), "legal": {}}
+    as_of = date(2025, 4, 15)
+    base = build_case(g, None, prof, load_config(), as_of, None, payments_path=reg)
+    manual = build_case(g, None, prof, load_config(), as_of, None, payments_path=reg, overrides_path=ov)
+    assert manual.debt == base.debt - Decimal("500") + Decimal("1000")
+    assert any("ручные решения по платежам: 2" in n for n in manual.notes)

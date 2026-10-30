@@ -198,6 +198,7 @@ class Package:
     path: Path
     payments: Path | None = None
     exclude_services: object = None
+    overrides: Path | None = None  # csv с ручными решениями по платежам реестра
 
 
 def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: date,
@@ -234,7 +235,8 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     case = Case(primary, debtor, profile["claimant"], profile["representative"], date.max, date.min, as_of)
     several = len(packages) > 1
     for pkg, acc, removed in loaded:
-        _process_package(case, pkg, acc, removed, row, cfg, as_of, period, overrides_path, several)
+        _process_package(case, pkg, acc, removed, row, cfg, as_of, period,
+                         (overrides_path if pkg is packages[0] else None) or pkg.overrides, several)
     case.period_from = min(r.period_from for r in case.results.values())
     case.period_to = max(r.period_to for r in case.results.values())
     legal = profile.get("legal") or {}
@@ -367,14 +369,22 @@ def _apply_register(note, acc, cfg: dict, payments_path, overrides_path, as_of: 
     mk = lambda ps: [Entry(p.date, PAYMENT, cat, "Оплата (реестр)", p.amount, p.reason, ref=p.ref,
                            period=p.period_hint) for p in ps]
     acc.entries = [e for e in acc.entries if e.kind != PAYMENT] + mk([p for p in in_range if p.include])
+    manual = sum(1 for p in in_range if any(f.startswith("решение вручную") for f in p.flags))
     for kind in (ENFORCEMENT, THIRD_PARTY):
         sub = [p for p in in_range if p.kind == kind]
         if sub:
-            tot = sum((p.amount for p in sub), Decimal(0))
-            decided = "не зачтено" if not sub[0].include else "зачтено"
-            note(f"оплаты «{KIND_TITLES[kind]}»: {len(sub)} шт. на {fmt_money(tot)} руб. — {decided}"
-                 + ("; нужно ваше решение (payments.third_party_policy / --payment-overrides)"
-                    if any(p.flags for p in sub) else ""))
+            yes = [p for p in sub if p.include]
+            no = [p for p in sub if not p.include]
+            parts = []
+            if yes:
+                parts.append(f"зачтено {len(yes)} шт. на {fmt_money(sum((p.amount for p in yes), Decimal(0)))} руб.")
+            if no:
+                parts.append(f"не зачтено {len(no)} шт. на {fmt_money(sum((p.amount for p in no), Decimal(0)))} руб.")
+            note(f"оплаты «{KIND_TITLES[kind]}»: " + "; ".join(parts)
+                 + ("; нужно ваше решение (payments.third_party_policy / ручной выбор платежей)"
+                    if any(p.flags and not any(f.startswith("решение") for f in p.flags) for p in sub) else ""))
+    if manual:
+        note(f"ручные решения по платежам: {manual} шт.")
     # сценарии для сравнения
     resident = [p for p in in_range if p.kind not in (ENFORCEMENT,)]
     only_res = [p for p in in_range if p.kind == "resident"]

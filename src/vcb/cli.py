@@ -53,6 +53,7 @@ def run(argv):
     ap.add_argument("input", nargs="?", help="шахматка ЖКУ (xls/xlsx) или папка с шахматками (пакетный режим)")
     ap.add_argument("--cap-input", help="шахматка капитального ремонта (файл или папка); можно вместе с ЖКУ или одна")
     ap.add_argument("--cap-payments", help="реестр оплат по капитальному ремонту (файл или папка)")
+    ap.add_argument("--cap-payment-overrides", help="csv с ручными решениями по платежам реестра капремонта")
     ap.add_argument("--cap-exclude-services", help="услуги шахматки капремонта, снятые с расчёта, через «;»")
     ap.add_argument("-o", "--out", default="out", help="папка результата")
     ap.add_argument("-r", "--registry", help="реестр должников (csv/xlsx): набор полей по каждому должнику")
@@ -85,6 +86,7 @@ def run(argv):
 
     if not a.input and not a.cap_input:
         ap.error("укажите шахматку ЖКУ и/или --cap-input (шахматку капитального ремонта)")
+    cap_ov = Path(a.cap_payment_overrides) if a.cap_payment_overrides else None
     units = pair_units(Path(a.input) if a.input else None, Path(a.cap_input) if a.cap_input else None)
     rows = {}
     if a.registry:
@@ -97,14 +99,15 @@ def run(argv):
         title = " + ".join(x.name for x in (gku, kr) if x)
         try:
             row = (rows.get(gku.name.lower()) if gku else None) or (rows.get(kr.name.lower()) if kr else None)
+            cap_ov = Path(a.cap_payment_overrides) if a.cap_payment_overrides else None
             extra = [Package(CAPREPAIR, kr, Path(a.cap_payments) if a.cap_payments else None,
-                             a.cap_exclude_services)] if gku and kr else None
+                             a.cap_exclude_services, cap_ov)] if gku and kr else None
             if gku:
                 case = build_case(gku, row, profile, cfg, as_of, registry, period, a.payments, a.payment_overrides,
                                   a.exclude_services, SERVICES, extra)
             else:
-                case = build_case(kr, row, profile, cfg, as_of, registry, period, a.cap_payments, a.payment_overrides,
-                                  a.cap_exclude_services, CAPREPAIR)
+                case = build_case(kr, row, profile, cfg, as_of, registry, period, a.cap_payments,
+                                  cap_ov or a.payment_overrides, a.cap_exclude_services, CAPREPAIR)
             folder = out / safe(f"{case.account.number}_{case.debtor.fio}")
             write_case(case, folder, claim=not a.no_claim, allocation_report=a.allocation_report)
             kinds = " + ".join(NAMES[c] for c in case.results)
