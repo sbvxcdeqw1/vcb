@@ -36,8 +36,6 @@ def write_calc_card(path, case: Case, res: CategoryResult):
     ws = wb.active
     ws.title = "Карточка расчёта"
     lines = _lines(case, "Расчёт задолженности собственника жилья", res.category)
-    if case.excluded_services:
-        lines.insert(-1, ("Исключены из расчёта услуги: " + "; ".join(case.excluded_services), "left"))
     hdr = title_block(ws, 6, lines)
     header_row(ws, hdr, ["Дата", "Регистратор", "Операция", "Начислено, руб.", "Оплата, руб.", "Задолженность, руб."])
     r = hdr + 1

@@ -318,5 +318,5 @@ def test_chess_plus_register_pipeline(tmp_path):
     heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
     assert "Задолженность, руб." in heads
     text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-    assert "Сальдо на" not in text and "не вошедшие" not in text
+    assert "Сальдо на" not in text and "не вошедшие" not in text and "Исключены из расчёта" not in text
     assert f"Задолженность на {as_of:%d.%m.%Y}" in text
