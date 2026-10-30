@@ -514,3 +514,25 @@ def test_manual_payment_overrides(tmp_path):
     manual = build_case(g, None, prof, load_config(), as_of, None, payments_path=reg, overrides_path=ov)
     assert manual.debt == base.debt - Decimal("500") + Decimal("1000")
     assert any("ручные решения по платежам: 2" in n for n in manual.notes)
+
+
+# ---------------------------------------------------------------- предзаполнение должника из файлов
+def test_genitive_fio():
+    from vcb.names import genitive_fio
+
+    assert genitive_fio("Иванов Иван Иванович") == "Иванова Ивана Ивановича"
+    assert genitive_fio("Петрова Мария Сергеевна") == "Петровой Марии Сергеевны"
+    assert genitive_fio("Достоевский Фёдор Михайлович") == "Достоевского Фёдора Михайловича"
+    assert genitive_fio("Организация") == ""
+
+
+def test_autofill_from_files(tmp_path):
+    from vcb.autofill import autofill
+
+    g, _ = two_packages(tmp_path)
+    reg = tmp_path / "reg.xlsx"
+    make_register(reg, [("10.07.2024", 1000, "100000000001, Иванов Иван Иванович (л/с) / оплата")])
+    values, notes = autofill(str(g), str(reg))
+    assert (values["city"], values["street"], values["house"], values["flat"]) == ("Пермь", "Тестовая", "1", "2")
+    assert values["fio"] == "Иванов Иван Иванович" and values["fio_gen"] == "Иванова Ивана Ивановича"
+    assert any("реестра" in n for n in notes)

@@ -201,8 +201,98 @@ class History:
 
 
 # ----------------------------------------------------------------------------- окно
-COLORS = {"bg": "#12151b", "card": "#1b1f27", "field": "#252a34", "line": "#313746", "text": "#e8ebf2",
-          "muted": "#8d96a8", "accent": "#4c9aff", "accent_hover": "#3b86e8", "ok": "#4cc38a", "warn": "#f0b45c"}
+COLORS = {"bg": "#1f2633", "card": "#2a3345", "field": "#35405a", "line": "#46536e", "text": "#eef1f7",
+          "muted": "#a9b3c8", "accent": "#5aa2ff", "accent_hover": "#4690ee", "ok": "#5fd3a0", "warn": "#f3bd6a",
+          "hint": "#8590a8"}
+FONT_FAMILY = "Segoe UI"  # заменяется на Montserrat, если шрифт удалось загрузить
+
+HELP = {
+    "gku.source_file": "Excel-файл «Шахматка» из 1С по лицевому счёту должника (услуги по строкам, месяцы по столбцам). "
+                       "Из него берутся начисления; ФИО, адрес и участок суда подставятся в раздел «Должник» сами.",
+    "kr.source_file": "Такая же «Шахматка» из 1С, но по взносам на капитальный ремонт. Начисления берутся отсюда.",
+    "gku.source_dir": "Папка, где лежат шахматки ЖКУ — по одному файлу на должника. Каждый файл — отдельный расчёт.",
+    "kr.source_dir": "Папка с шахматками капитального ремонта. С файлами ЖКУ они сопоставляются по адресу квартиры.",
+    "gku.payments": "Реестр банковских документов с оплатами (файл или папка). Подойдёт общий реестр банка: платежи "
+                    "отберутся по лицевому счёту. Оплаты разносятся по периодам из назначения платежа.",
+    "kr.payments": "Реестр оплат взносов на капитальный ремонт. Платежи по исполнительному производству программа "
+                   "в зачёт не берёт; решение можно изменить галочками ниже.",
+    "registry": "Необязательная таблица (csv/xlsx) с ФИО, адресами и периодами должников пакета. Пустые поля берутся "
+                "из шапки выгрузок. Шаблон создаётся кнопкой ниже.",
+    "out": "Папка, куда сохранятся шахматка, карточка расчёта, расчёт пени и заявление. Для каждого должника создаётся "
+           "своя подпапка.",
+    "debtor.fio": "Фамилия, имя, отчество должника. Попадает в заявление, шапки карточки и шахматки.",
+    "debtor.fio_gen": "ФИО в родительном падеже для фраз «взыскать с …». Программа составляет его по правилам — "
+                      "проверьте окончания.",
+    "debtor.city": "Населённый пункт квартиры. Нужен для определения суда и участка мирового судьи.",
+    "debtor.street": "Улица без слова «ул.». Вместе с домом определяет участок мирового судьи и попадает в заявление.",
+    "debtor.house": "Номер дома (с литерой или корпусом, если есть). Определяет участок мирового судьи.",
+    "debtor.flat": "Номер квартиры. Выводится в адресе должника в документах.",
+    "debtor.area": "Площадь помещения. Необязательно: указывается в заявлении, если известна.",
+    "debtor.birth_date": "Нужна для заявления о выдаче судебного приказа (ст. 124 ГПК РФ). В иске не используется.",
+    "debtor.birth_place": "Нужно для заявления о выдаче судебного приказа. В иске не используется.",
+    "debtor.court": "Участок мирового судьи, например «№ 3 Кировского района». Программа определяет его по адресу; "
+                    "если не смогла однозначно — впишите сами. От участка зависит шапка заявления.",
+    "claimant.name": "Полное наименование организации-взыскателя — идёт в заявление («в пользу …») и в шапку.",
+    "claimant.short_name": "Краткое наименование — подписывает шахматку и карточку расчёта.",
+    "claimant.ogrn": "ОГРН взыскателя — выводится в реквизитах заявления.",
+    "claimant.inn": "ИНН взыскателя — выводится в реквизитах заявления.",
+    "claimant.address": "Адрес взыскателя для шапки заявления и почтовых отправлений.",
+    "claimant.phone": "Контактный телефон взыскателя в заявлении.",
+    "claimant.sign_name": "Как подписывать от имени взыскателя, например «И.О.Фамилия». Попадает в подпись документов.",
+    "rep.name": "ФИО представителя взыскателя. Указывается в заявлении и в подписи под таблицами Excel.",
+    "rep.sign_name": "Подпись представителя в формате «И.О.Фамилия» — внизу каждого Excel-документа и заявления.",
+    "rep.address": "Адрес представителя для заявления.",
+    "rep.phone": "Телефон представителя для заявления.",
+    "legal.executor": "Организация или лицо, оказавшее юридические услуги по подготовке заявления.",
+    "legal.contract": "Номер и дата договора на юридические услуги — для требования о возмещении судебных расходов.",
+    "legal.costs": "Сумма расходов на юриста, ₽. Если заполнить, в заявлении появится требование о возмещении.",
+    "par.as_of": "Дата, на которую считаются долг и пени (обычно сегодня). Формат дд.мм.гггг.",
+    "par.period_from": "Начало расчётного периода. Начисления и оплаты до этой даты не учитываются. "
+                       "Пусто — с первого начисления выгрузки.",
+    "par.period_to": "Конец расчётного периода. Пусто — до последнего начисления выгрузки.",
+    "par.doc": "Судебный приказ или исковое заявление. «Автоматически» — приказ при сумме до 500 000 ₽, иначе иск.",
+    "par.region": "Регион, по справочнику судов которого определяется подсудность.",
+}
+
+
+class Tooltip:
+    """Всплывающая подсказка у виджета: появляется при наведении и пропадает при уходе курсора."""
+
+    def __init__(self, widget, text: str, delay: int = 350):
+        self.widget, self.text, self.delay, self.tip, self.job = widget, text, delay, None, None
+        widget.bind("<Enter>", self._enter, add="+")
+        widget.bind("<Leave>", self._leave, add="+")
+        widget.bind("<ButtonPress>", self._leave, add="+")
+
+    def _enter(self, _e=None):
+        self._cancel()
+        self.job = self.widget.after(self.delay, self._show)
+
+    def _cancel(self):
+        if self.job:
+            self.widget.after_cancel(self.job)
+            self.job = None
+
+    def _show(self):
+        if self.tip or not self.text:
+            return
+        x, y = self.widget.winfo_pointerx() + 14, self.widget.winfo_pointery() + 18
+        self.tip = tk.Toplevel(self.widget)
+        self.tip.wm_overrideredirect(True)
+        self.tip.attributes("-topmost", True)
+        tk.Label(self.tip, text=self.text, justify="left", wraplength=340, bg=COLORS["field"], fg=COLORS["text"],
+                 padx=12, pady=8, relief="solid", bd=1, font=(FONT_FAMILY, 10)).pack()
+        self.tip.update_idletasks()
+        sw, sh = self.widget.winfo_screenwidth(), self.widget.winfo_screenheight()
+        x = min(x, sw - self.tip.winfo_width() - 10)
+        y = y if y + self.tip.winfo_height() < sh - 10 else y - self.tip.winfo_height() - 36
+        self.tip.wm_geometry(f"+{x}+{y}")
+
+    def _leave(self, _e=None):
+        self._cancel()
+        if self.tip:
+            self.tip.destroy()
+            self.tip = None
 
 
 class App:
@@ -211,12 +301,13 @@ class App:
 
         self.ctk = ctk
         ctk.set_appearance_mode("dark")
+        self._load_fonts(ctk)
         self.win = ctk.CTk(fg_color=COLORS["bg"])
         from vcb import __version__  # noqa: PLC0415
 
         self.win.title(f"vcb {__version__} — расчёт задолженности по ЖКУ и заявление в суд")
-        self.win.geometry("1040x860")
-        self.win.minsize(900, 680)
+        self.win.geometry("1320x980")
+        self.win.minsize(1100, 720)
         from vcb.config import DATA, ROOT  # noqa: PLC0415
 
         self.root_dir, self.data_dir = ROOT, DATA
@@ -225,8 +316,245 @@ class App:
         self.entries: dict[str, object] = {}
         self._results: queue.Queue = queue.Queue()
         self.mode = tk.StringVar(value="Один должник")
+        self.auto_vals: dict[str, str] = {}
         self._build()
+        self._install_clipboard()
         self._load_last()
+
+
+    # ---- шрифт Montserrat (лежит в папке fonts рядом с программой)
+    @staticmethod
+    def _load_fonts(ctk):
+        global FONT_FAMILY
+        loaded = False
+        for name in ("Montserrat-Regular.ttf", "Montserrat-Bold.ttf"):
+            f = HERE / "fonts" / name
+            if f.is_file():
+                try:
+                    loaded = bool(ctk.FontManager.load_font(str(f))) or loaded
+                except Exception:  # noqa: BLE001
+                    pass
+        if loaded:
+            FONT_FAMILY = "Montserrat"
+            ctk.ThemeManager.theme["CTkFont"]["family"] = "Montserrat"
+
+    # ---- буфер обмена: Ctrl+C/V/X/A работают в любой раскладке + меню по правому щелчку
+    def _install_clipboard(self):
+        win = self.win
+        latin = {"v", "c", "x", "a"}
+        by_keycode = {86: "<<Paste>>", 67: "<<Copy>>", 88: "<<Cut>>", 65: "select"}   # Windows: код клавиши
+        by_keysym = {"cyrillic_em": "<<Paste>>", "cyrillic_es": "<<Copy>>", "cyrillic_che": "<<Cut>>",
+                     "cyrillic_ef": "select"}                                           # Linux/Mac: русские символы
+
+        def editable(widget):
+            return isinstance(widget, (tk.Entry, tk.Text))
+
+        def select_all(widget):
+            if isinstance(widget, tk.Entry):
+                widget.select_range(0, "end")
+                widget.icursor("end")
+            else:
+                widget.tag_add("sel", "1.0", "end")
+
+        def on_key(e):
+            if not editable(e.widget) or e.keysym.lower() in latin:   # латиница работает штатно
+                return None
+            action = by_keysym.get(e.keysym.lower()) or (by_keycode.get(e.keycode) if sys.platform == "win32" else None)
+            if not action:
+                return None
+            if action == "select":
+                select_all(e.widget)
+            else:
+                e.widget.event_generate(action)
+            return "break"
+
+        menu = tk.Menu(win, tearoff=0, bg=COLORS["field"], fg=COLORS["text"], activebackground=COLORS["accent"],
+                       activeforeground="#ffffff", bd=0, font=(FONT_FAMILY, 10))
+
+        def popup(e):
+            w = e.widget
+            if not editable(w):
+                return None
+            w.focus_set()
+            menu.delete(0, "end")
+            readonly = str(w.cget("state")) == "disabled"
+            for label, ev in (("Вырезать", "<<Cut>>"), ("Копировать", "<<Copy>>"), ("Вставить", "<<Paste>>")):
+                menu.add_command(label=label, command=lambda ev=ev, w=w: w.event_generate(ev),
+                                 state="disabled" if readonly and ev != "<<Copy>>" else "normal")
+            menu.add_separator()
+            menu.add_command(label="Выделить всё", command=lambda w=w: select_all(w))
+            menu.tk_popup(e.x_root, e.y_root)
+            return "break"
+
+        self._on_key = on_key
+        win.bind_all("<Control-KeyPress>", on_key, add="+")
+        win.bind_all("<Button-3>", popup, add="+")
+        if sys.platform == "darwin":
+            win.bind_all("<Button-2>", popup, add="+")
+
+    # ---- подписи полей с подсказкой
+    def label(self, parent, text: str, help_text: str = ""):
+        ctk = self.ctk
+        row = ctk.CTkFrame(parent, fg_color="transparent")
+        lab = ctk.CTkLabel(row, text=text, text_color=COLORS["muted"], anchor="w", font=ctk.CTkFont(size=12))
+        lab.pack(side="left", padx=(2, 0))
+        if help_text:
+            icon = ctk.CTkLabel(row, text=" ⓘ", text_color=COLORS["accent"], cursor="question_arrow",
+                                font=ctk.CTkFont(size=12))
+            icon.pack(side="left")
+            for widget in (icon, lab):
+                Tooltip(widget, help_text)
+        return row
+
+    # ---- левая панель: разделы и чек-лист заполненности
+    def _build_nav(self, parent):
+        ctk = self.ctk
+        self.nav = ctk.CTkFrame(parent, width=270, corner_radius=18, fg_color=COLORS["card"], border_width=1,
+                                border_color=COLORS["line"])
+        self.nav.grid(row=0, column=0, sticky="ns", padx=(18, 0), pady=(18, 18))
+        self.nav.grid_propagate(False)
+        ctk.CTkLabel(self.nav, text="Разделы", font=ctk.CTkFont(size=16, weight="bold"), text_color=COLORS["text"],
+                     anchor="w").pack(fill="x", padx=18, pady=(18, 2))
+        ctk.CTkLabel(self.nav, text="Щёлкните, чтобы перейти. Значок показывает, заполнен ли раздел.",
+                     text_color=COLORS["hint"], anchor="w", justify="left", wraplength=230,
+                     font=ctk.CTkFont(size=11)).pack(fill="x", padx=18, pady=(0, 10))
+        self.nav_rows: list[dict] = []
+        self.nav_foot = ctk.CTkLabel(self.nav, text="", text_color=COLORS["muted"], anchor="w", justify="left",
+                                     wraplength=230, font=ctk.CTkFont(size=12))
+        self.nav_foot.pack(side="bottom", fill="x", padx=18, pady=(8, 16))
+
+    def _fill_nav(self):
+        ctk = self.ctk
+        items = [("docs", "1. Исходные документы", self.src_card), ("debtor", "2. Должник", self.debtor_card),
+                 ("claimant", "3. Взыскатель", self.claimant_card), ("rep", "4. Представитель", self.rep_card),
+                 ("legal", "5. Юридические расходы", self.legal_card), ("par", "6. Параметры расчёта", self.par_card)]
+        for key, title, card in items:
+            row = ctk.CTkFrame(self.nav, fg_color="transparent", corner_radius=12, cursor="hand2")
+            row.pack(fill="x", padx=10, pady=2)
+            icon = ctk.CTkLabel(row, text="○", width=26, font=ctk.CTkFont(size=16, weight="bold"),
+                                text_color=COLORS["hint"])
+            icon.grid(row=0, column=0, rowspan=2, padx=(8, 2), pady=6)
+            name = ctk.CTkLabel(row, text=title, anchor="w", text_color=COLORS["text"], font=ctk.CTkFont(size=13))
+            name.grid(row=0, column=1, sticky="ew", pady=(6, 0))
+            detail = ctk.CTkLabel(row, text="", anchor="w", justify="left", wraplength=190, text_color=COLORS["hint"],
+                                  font=ctk.CTkFont(size=11))
+            detail.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+            row.columnconfigure(1, weight=1)
+            for wdg in (row, icon, name, detail):
+                wdg.bind("<Button-1>", lambda e, c=card: self.goto(c))
+                wdg.bind("<Enter>", lambda e, r=row: r.configure(fg_color=COLORS["field"]))
+                wdg.bind("<Leave>", lambda e, r=row: r.configure(fg_color="transparent"))
+            self.nav_rows.append({"key": key, "row": row, "icon": icon, "detail": detail})
+        self.nav_job = None
+        watched = [k for k in self.vars if k not in ("out",)] + ["out"]
+        for k in watched:
+            self.vars[k].trace_add("write", lambda *a: self._schedule_nav())
+        self._update_nav()
+
+    def goto(self, card):
+        self.win.update_idletasks()
+        canvas = self.scroll._parent_canvas
+        total = max(self.scroll.winfo_height(), 1)
+        canvas.yview_moveto(max(0.0, min(1.0, (card.winfo_y() - 6) / total)))
+
+    def _schedule_nav(self):
+        if getattr(self, "nav_job", None):
+            self.win.after_cancel(self.nav_job)
+        self.nav_job = self.win.after(250, self._update_nav)
+
+    def _checklist(self) -> dict:
+        v = lambda k: self.vars[k].get().strip()
+        single = self.mode.get() == "Один должник"
+        res: dict[str, tuple[str, str]] = {}
+        packs = [(t, k) for k, t in (("gku", "ЖКУ"), ("kr", "КР")) if self.source(k)]
+        if not packs:
+            res["docs"] = ("todo", "нужна шахматка ЖКУ или капремонта")
+        else:
+            no_reg = [t for t, k in packs if not v(f"{k}.payments")]
+            detail = " · ".join(f"{t} {'✓' if t not in no_reg else '—'}" for t, _ in packs)
+            res["docs"] = ("warn", f"нет реестра оплат: {', '.join(no_reg)}") if no_reg else \
+                ("ok", f"{detail}, реестры выбраны")
+        if single:
+            need = [("fio", "ФИО"), ("city", "город"), ("street", "улица"), ("house", "дом"), ("flat", "кв.")]
+            miss = [t for k, t in need if not v(f"debtor.{k}")]
+            extra = [] if v("debtor.court") else ["участок суда"]
+            if not miss:
+                res["debtor"] = ("ok", ("не определён: " + ", ".join(extra)) if extra else "данные заполнены")
+            else:
+                res["debtor"] = ("warn" if len(miss) < len(need) else "todo", "не хватает: " + ", ".join(miss))
+        else:
+            res["debtor"] = ("opt", "берётся из выгрузок и реестра должников")
+        c = v("claimant.name") or v("claimant.short_name")
+        res["claimant"] = ("ok", "заполнен" + ("" if v("claimant.sign_name") else ", нет подписи")) if c else \
+            ("opt", "необязательно")
+        res["rep"] = ("ok", "заполнен" + ("" if v("rep.sign_name") else ", нет подписи")) if v("rep.name") else \
+            ("opt", "необязательно")
+        res["legal"] = ("ok", "расходы указаны") if v("legal.costs") else ("opt", "необязательно")
+        bad = []
+        if not parse_date(v("par.as_of")):
+            bad.append("дата расчёта")
+        if not v("out"):
+            bad.append("папка результата")
+        res["par"] = ("todo", "укажите: " + ", ".join(bad)) if bad else ("ok", "задано")
+        return res
+
+    def _update_nav(self):
+        self.nav_job = None
+        res = self._checklist()
+        single = self.mode.get() == "Один должник"
+        style = {"ok": ("✓", COLORS["ok"]), "warn": ("!", COLORS["warn"]), "todo": ("○", COLORS["accent"]),
+                 "opt": ("–", COLORS["hint"])}
+        for r in self.nav_rows:
+            state, detail = res[r["key"]]
+            sym, color = style[state]
+            r["icon"].configure(text=sym, text_color=color)
+            r["detail"].configure(text=detail, text_color=COLORS["warn"] if state == "warn" else COLORS["hint"])
+        required = [k for k in ("docs", "debtor", "par") if k != "debtor" or single]
+        done = sum(res[k][0] in ("ok", "warn") and not (k == "debtor" and res[k][0] == "warn") for k in required)
+        ready = all(res[k][0] == "ok" or (k == "docs" and res[k][0] == "warn") for k in required)
+        self.nav_foot.configure(
+            text=f"Обязательных разделов заполнено: {done} из {len(required)}. "
+                 + ("Можно считать." if ready else "Заполните отмеченные ○ и !."),
+            text_color=COLORS["ok"] if ready else COLORS["muted"])
+
+    # ---- предзаполнение из файлов
+    def _schedule_autofill(self):
+        if getattr(self, "af_job", None):
+            self.win.after_cancel(self.af_job)
+        self.af_job = self.win.after(800, self.autofill)
+
+    def autofill(self):
+        """Берёт ФИО, адрес и участок суда из шахматки/реестра и подставляет в пустые поля должника.
+        Поля, которые оператор уже изменил руками, не затираются."""
+        from vcb.autofill import autofill  # noqa: PLC0415
+
+        self.af_job = None
+        if self.mode.get() != "Один должник":
+            return
+        chess = next((self.vars[f"{k}.source_file"].get().strip() for k in ("gku", "kr")
+                      if self.vars[f"{k}.source_file"].get().strip()), "")
+        reg = next((self.vars[f"{k}.payments"].get().strip() for k in ("gku", "kr")
+                    if self.vars[f"{k}.payments"].get().strip()), "")
+        try:
+            values, notes = autofill(chess, reg, self.regions.get(self.vars["par.region"].get(), "perm_krai"))
+        except Exception as e:  # noqa: BLE001
+            self.auto_hint.configure(text=f"Не удалось прочитать данные должника из файлов: {e}")
+            return
+        filled = []
+        for key, *_ in DEBTOR_FIELDS:
+            var = self.vars[f"debtor.{key}"]
+            cur, last = var.get().strip(), self.auto_vals.get(key)
+            new = values.get(key, "")
+            if new and (not cur or cur == last):
+                var.set(new)
+                self.auto_vals[key] = new
+                filled.append(key)
+            elif not new and cur and cur == last:
+                var.set("")
+                self.auto_vals.pop(key, None)
+        names = {k: t for k, t, _ in DEBTOR_FIELDS}
+        text = ("Подставлено из файлов: " + ", ".join(names[k] for k in filled) + ". ") if filled else ""
+        self.auto_hint.configure(text=(text + "; ".join(notes)).strip())
 
     # ---- элементы
     def var(self, key: str, value: str = "") -> tk.StringVar:
@@ -252,11 +580,10 @@ class App:
         ctk = self.ctk
         cell = ctk.CTkFrame(parent, fg_color="transparent")
         cell.grid(row=row, column=col, columnspan=span, sticky="ew", padx=6, pady=4)
-        ctk.CTkLabel(cell, text=label, text_color=COLORS["muted"], anchor="w", font=ctk.CTkFont(size=12)
-                     ).pack(fill="x", padx=2)
+        self.label(cell, label, HELP.get(f"{prefix}.{key}", "")).pack(fill="x", padx=2)
         ent = ctk.CTkEntry(cell, textvariable=self.var(f"{prefix}.{key}"), placeholder_text=hint, height=38,
                            corner_radius=12, fg_color=COLORS["field"], border_color=COLORS["line"],
-                           text_color=COLORS["text"], placeholder_text_color="#5d6678")
+                           text_color=COLORS["text"], placeholder_text_color=COLORS["hint"])
         ent.pack(fill="x")
         self.entries[f"{prefix}.{key}"] = ent
         return ent
@@ -273,11 +600,10 @@ class App:
         cell.grid(row=row, column=0, sticky="ew", padx=6, pady=4)
         body.columnconfigure(0, weight=1)
         cell.columnconfigure(0, weight=1)
-        ctk.CTkLabel(cell, text=label, text_color=COLORS["muted"], anchor="w", font=ctk.CTkFont(size=12)
-                     ).grid(row=0, column=0, columnspan=2, sticky="ew", padx=2)
+        self.label(cell, label, HELP.get(key, "")).grid(row=0, column=0, columnspan=2, sticky="ew", padx=2)
         ent = ctk.CTkEntry(cell, textvariable=self.var(key), placeholder_text=hint, height=38, corner_radius=12,
                            fg_color=COLORS["field"], border_color=COLORS["line"], text_color=COLORS["text"],
-                           placeholder_text_color="#5d6678")
+                           placeholder_text_color=COLORS["hint"])
         ent.grid(row=1, column=0, sticky="ew")
         btns = ctk.CTkFrame(cell, fg_color="transparent")
         btns.grid(row=1, column=1, padx=(8, 0))
@@ -322,7 +648,12 @@ class App:
     # ---- сборка окна
     def _build(self):
         ctk = self.ctk
-        w = self.win
+        root = self.win
+        root.grid_columnconfigure(1, weight=1)
+        root.grid_rowconfigure(0, weight=1)
+        self._build_nav(root)
+        w = ctk.CTkFrame(root, fg_color="transparent")
+        w.grid(row=0, column=1, sticky="nsew")
         w.grid_columnconfigure(0, weight=1)
         w.grid_rowconfigure(1, weight=1)
         head = ctk.CTkFrame(w, fg_color="transparent")
@@ -374,6 +705,9 @@ class App:
         grid.grid(row=1, column=0, columnspan=2, sticky="ew")
         body.columnconfigure((0, 1), weight=1)
         self.grid_fields(grid, "debtor", DEBTOR_FIELDS)
+        self.auto_hint = ctk.CTkLabel(body, text="", text_color=COLORS["ok"], anchor="w", justify="left",
+                                      wraplength=820, font=ctk.CTkFont(size=12))
+        self.auto_hint.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(4, 0))
 
         # 3. взыскатель
         self.claimant_card, body = self.card(s, "3. Взыскатель", "Можно не заполнять — в документах останутся пустые поля.")
@@ -397,7 +731,7 @@ class App:
         self.grid_fields(body, "legal", LEGAL_FIELDS, cols=3)
 
         # 6. параметры
-        _, body = self.card(s, "6. Параметры расчёта")
+        self.par_card, body = self.card(s, "6. Параметры расчёта")
         body.columnconfigure((0, 1, 2), weight=1, uniform="par")
         today = date.today().strftime("%d.%m.%Y")
         self.field(body, "par", "as_of", "Рассчитать на дату", "дд.мм.гггг", 0, 0).insert(0, today)
@@ -418,8 +752,7 @@ class App:
                 ("Регион (для определения суда)", list(self.regions) or ["Пермский край"], "region"))):
             cell = ctk.CTkFrame(body, fg_color="transparent")
             cell.grid(row=1, column=col, sticky="ew", padx=6, pady=(10, 4))
-            ctk.CTkLabel(cell, text=label, text_color=COLORS["muted"], anchor="w", font=ctk.CTkFont(size=12)
-                         ).pack(fill="x", padx=2)
+            self.label(cell, label, HELP.get(f"par.{key}", "")).pack(fill="x", padx=2)
             menu = ctk.CTkOptionMenu(cell, values=values, variable=self.var(f"par.{key}", values[0]), height=38,
                                      corner_radius=12, fg_color=COLORS["field"], button_color=COLORS["line"],
                                      button_hover_color=COLORS["accent"], dropdown_fg_color=COLORS["field"])
@@ -453,12 +786,20 @@ class App:
         self.progress = ctk.CTkProgressBar(bar, mode="indeterminate", width=140, progress_color=COLORS["accent"])
         self.status = ctk.CTkLabel(bar, text="", text_color=COLORS["muted"])
         self.status.pack(side="right")
-        self.log = ctk.CTkTextbox(bottom, height=120, corner_radius=12, fg_color=COLORS["bg"],
-                                  text_color=COLORS["text"], font=("Consolas", 12), border_width=1,
+        self.log = ctk.CTkTextbox(bottom, height=220, corner_radius=12, fg_color=COLORS["bg"],
+                                  text_color=COLORS["text"], font=("Consolas", 14), border_width=1,
                                   border_color=COLORS["line"])
         self.log.pack(fill="x", padx=16, pady=(0, 16))
         self.log.insert("end", "Здесь появится ход расчёта и замечания по каждому должнику.\n")
         self.log.configure(state="disabled")
+        for text, widget in (("Заявление готовится вместе с расчётами. Снимите галочку, если нужны только Excel-документы.",
+                              opts.winfo_children()[0]),
+                             ("Для проверки: какой платёж на какие начисления разнесён и что исключено.",
+                              opts.winfo_children()[1])):
+            Tooltip(widget, text)
+        self._fill_nav()
+        for k in ("gku.source_file", "kr.source_file", "gku.payments", "kr.payments", "par.region"):
+            self.vars[k].trace_add("write", lambda *a: self._schedule_autofill())
         self._switch_mode(self.mode.get())
 
     def _build_package(self, tab, key: str):
@@ -519,6 +860,8 @@ class App:
                 pk["batch"].pack(fill="x", before=pk["pay"])
             self.refresh_services(key)
             self.refresh_payments(key)
+        if hasattr(self, "nav_rows"):
+            self._update_nav()
         if single:
             self.batch_extra.pack_forget()
             self.debtor_card.pack(fill="x", padx=6, pady=7, before=self.claimant_card)
