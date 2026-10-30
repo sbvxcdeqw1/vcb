@@ -152,7 +152,7 @@ def main(cache: str, out: str, manual: str | None = None):
         entry = {"id": "ms-" + slug(p["name"]), "level": "magistrate", "name": p["name"], "address": p["address"],
                  "judge": p["judge"], "parent": parent["id"] if parent else None,
                  "judicial_district": p["judicial_district"],
-                 "territory_text": "" if p["streets"] else p["text"],
+                 "territory_text": p["text"],
                  "territory": [{"city": p["city"], "streets": p["streets"]}] if p["streets"] else []}
         courts.append(entry)
         n_ms += 1

@@ -120,10 +120,13 @@ LEAD_ACCOUNT = re.compile(r"^\s*(\d{6,})\b")
 
 
 def filter_by_account(pays: list[Payment], number: str) -> tuple[list[Payment], int]:
-    """В общем реестре банка оставляет платежи нужного лицевого счёта («551010009822, ФИО (л/с) / ...»).
+    """В общем реестре банка оставляет платежи нужного лицевого счёта («100000000001, ФИО (л/с) / ...»).
     Если в реестре нет ни одного платежа с лицевым счётом в начале назначения - возвращает всё без изменений."""
-    if not number or not number.isdigit():
+    if not number:
         return pays, 0
+    if not number.isdigit():  # «К01»: лицевой счёт с буквами - отбираем платежи, назначение которых с него начинается
+        mine = [p for p in pays if re.match(rf"^\s*{re.escape(number)}\b", p.info, re.I)]
+        return (mine, len(pays) - len(mine)) if mine else (pays, 0)
     attributed = [p for p in pays if LEAD_ACCOUNT.match(p.info)]
     if not attributed:
         return pays, 0

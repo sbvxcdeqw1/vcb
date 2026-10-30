@@ -1,4 +1,4 @@
-"""Сверка с образцами заказчика: Кировоградская 180, кв. 24, расчёт на 13.04.2026."""
+"""Сверка с образцами заказчика (обезличенные файлы кладутся в examples/, в репозиторий не входят)."""
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -16,7 +16,7 @@ SAMPLE = Path(__file__).parent.parent / "examples" / "karta_kv24.xls"
 @pytest.mark.skipif(not SAMPLE.exists(), reason="нет примера выгрузки")
 def test_kv24_matches_sample():
     acc = parse_card(SAMPLE)
-    assert acc.number == "00-0000000024"
+    assert acc.number.startswith("00-")  # лицевой счёт карточки 1С
     entries = [e for e in acc.entries if e.category == SERVICES]
     as_of = date(2026, 4, 13)
     lines = select_lines(build_charge_lines(entries, as_of=as_of), period_from=date(2024, 6, 1))
@@ -48,9 +48,9 @@ def test_court_lookup():
 
     assert house_matches("2-40 чёт", "12") and not house_matches("2-40 чёт", "13")
     reg = CourtRegistry([Court("a", "magistrate", "Участок 1", territory=[
-        {"city": "Пермь", "streets": [{"street": "ул. Кировоградская", "houses": "100-200"}]}])])
-    assert reg.find(Debtor(city="Пермь", street="Кировоградская", house="180"), "magistrate").name == "Участок 1"
-    assert reg.find(Debtor(city="Пермь", street="Кировоградская", house="20"), "magistrate") is None
+        {"city": "Пермь", "streets": [{"street": "ул. Ленина", "houses": "100-200"}]}])])
+    assert reg.find(Debtor(city="Пермь", street="Ленина", house="180"), "magistrate").name == "Участок 1"
+    assert reg.find(Debtor(city="Пермь", street="Ленина", house="20"), "magistrate") is None
 
 
 CHESS = Path(__file__).parent.parent / "examples" / "shakhmatka_kv98.xlsx"
@@ -62,7 +62,7 @@ def test_chess_parse_and_full_debt_matches_closing_balance():
     from vcb.parsers.onec import parse_any
 
     acc = parse_any(CHESS)
-    assert acc.number == "551010009822" and not acc.warnings
+    assert acc.number.isdigit() and len(acc.number) == 12 and not acc.warnings
     lines = build_charge_lines(acc.entries, as_of=date(2026, 7, 31), with_opening=True)  # с начальным остатком
     assert total_debt(lines) == Decimal("79793.41")  # «Конечный остаток» образца
     assert sum(e.amount for e in acc.entries if e.kind == OPENING) == Decimal("5859.31")
@@ -94,7 +94,7 @@ def test_payment_classification_and_overrides(tmp_path):
 
     mk = lambda i, d, a, t: Payment(f"П{i}", d, Decimal(a), t)
     ps = [mk(1, date(2019, 6, 24), "0.62", "Погашение долга Судебный приказ N2-1968/19 от 16.04.2019, 37522/19/59003-ИП"),
-          mk(2, date(2020, 1, 20), "3000", "551010009822 12.2019-12.2019 к/плата=3000.00"),
+          mk(2, date(2020, 1, 20), "3000", "100000000001 12.2019-12.2019 к/плата=3000.00"),
           mk(3, date(2025, 6, 5), "978.63", "(991-0501-1540121500-244,л/с02991018855,225) ПД за 01.22")]
     classify(ps, load_config())
     assert [p.kind for p in ps] == [ENFORCEMENT, RESIDENT, THIRD_PARTY]
@@ -155,16 +155,18 @@ def test_period_is_strictly_operator_defined():
     assert not _in_period(E(date(2024, 5, 1), PAYMENT), a, b) and _in_period(E(date(2024, 7, 1), PAYMENT), a, b)
 
 
-def test_real_perm_register_matches_sample_court():
+def test_real_perm_register_resolves_addresses_from_its_own_data():
     from vcb.court.registry import CourtRegistry
     from vcb.models import Debtor
 
     reg = CourtRegistry.load("perm_krai")
-    d = Debtor(city="Пермь", street="Кировоградская", house="180", flat="24")
-    ms = reg.find(d, "magistrate")
-    assert ms and "№ 6 Кировского района" in ms.name  # дом 180 входит в участок № 6 (ранее - № 2)
+    ms = next(c for c in reg.courts if c.level == "magistrate" and "№ 1 Кировского района" in c.name and c.territory)
+    street = ms.territory[0]["streets"][0]
+    house = street["houses"].split(",")[0].split("-")[0].strip() if street["houses"] != "all" else "1"
+    d = Debtor(city="Пермь", street=street["street"], house=house)
+    assert reg.find(d, "magistrate").name == ms.name  # участок определяется по списку улиц и домов
     dc = reg.find(d, "district")
-    assert dc.name == "Кировский районный суд г. Перми" and dc.address == "614113, г. Пермь, ул. Кировоградская, д. 37"
+    assert dc.name == "Кировский районный суд г. Перми" and dc.address.startswith("614113")
     # населённый пункт без разобранных улиц - по тексту описания границ
     assert reg.find(Debtor(city="Александровск", street="Ленина", house="5"), "district").name.startswith("Александровский")
 
@@ -348,9 +350,9 @@ MONTHS_2024 = [(2024, m) for m in range(6, 13)] + [(2025, 1), (2025, 2)]
 
 def two_packages(tmp_path):
     g, k = tmp_path / "gku_98.xlsx", tmp_path / "kr_98_other_name.xlsx"
-    make_chess(g, "551010009822", "г.ПЕРМЬ, Адмирала Ушакова, д.55/1, кв. 98", {"Содержание": 1000, "Домофон": 50},
+    make_chess(g, "100000000001", "г.ПЕРМЬ, Тестовая, д.1, кв. 2", {"Содержание": 1000, "Домофон": 50},
                MONTHS_2024)
-    make_chess(k, "991000000098", "Пермь г, Адмирала Ушакова, д.55/1, кв.98", {"Взнос на капремонт": 600}, MONTHS_2024)
+    make_chess(k, "К100", "Пермь г, Тестовая, д.1, кв.2", {"Взнос на капремонт": 600}, MONTHS_2024)
     return g, k
 
 
@@ -402,3 +404,42 @@ def test_pair_units_by_address(tmp_path):
     units = pair_units(gd, kd)
     assert [(a.name if a else None, b.name if b else None) for a, b in units] == [
         ("a.xlsx", "completely_different.xlsx"), (None, "alone.xlsx")]
+
+
+KR_REAL = Path(__file__).parent.parent / "examples" / "shakhmatka_kr.xls"
+
+
+@pytest.mark.skipif(not KR_REAL.exists(), reason="нет примера шахматки капремонта")
+def test_real_caprepair_chess():
+    from vcb.config import load_config
+    from vcb.models import CAPREPAIR, PENALTY, Party
+    from vcb.parsers.chess import list_services
+    from vcb.parsers.onec import parse_any
+    from vcb.pipeline import build_case
+
+    acc = parse_any(KR_REAL)
+    assert acc.number and not acc.number.isdigit() and len(acc.owner.split()) == 3 and not acc.warnings  # ЛС «К..»
+    assert any(e.kind == PENALTY for e in acc.entries)  # строка «Пени» - не долг
+    assert [n for n, _ in list_services(KR_REAL)] == ["Взнос на капремонт"]
+    prof = {"claimant": Party(), "representative": Party(), "legal": {}}
+    case = build_case(KR_REAL, None, prof, load_config(), date(2026, 10, 30), None, category=CAPREPAIR)
+    res = case.results[CAPREPAIR]
+    assert res.debt == Decimal("47959.11") and res.penalty > 0  # начальный остаток 50 750,77 в расчёт не входит
+    assert {s.divisor for it in res.penalty_items for s in it.segments} == {300}
+    assert case.debtor.fio == acc.owner and case.debtor.city == "Пермь"  # город из «ПЕРМЬ, ул.…» без «г.»
+    assert case.debtor.street.startswith("ул. ") and case.debtor.house and case.debtor.flat
+
+
+def test_court_override_and_common_district():
+    from vcb.court.registry import Court, CourtRegistry
+    from vcb.models import Debtor
+
+    text = "г. Пермь: в границах от ул. Тестовой до ул. Примерной"
+    reg = CourtRegistry([
+        Court("d1", "district", "Тестовый районный суд г. Перми"),
+        Court("m1", "magistrate", "Судебный участок № 1 Тестового района", parent="d1", territory_text=text),
+        Court("m2", "magistrate", "Судебный участок № 2 Тестового района", parent="d1", territory_text=text)])
+    d = Debtor(city="Пермь", street="Тестовая", house="48")  # дом внутри описанной границы: участок неоднозначен
+    assert reg.find(d, "magistrate") is None and len(reg.candidates) == 2
+    assert reg.find(d, "district").name == "Тестовый районный суд г. Перми"  # все кандидаты - одного района
+    assert "№ 2 Тестового района" in reg.find(d, "magistrate", "№ 2 Тестового района").name

@@ -6,11 +6,11 @@ courts:
   - id: perm-kirovsky-rs
     level: district | magistrate
     name: Кировский районный суд г. Перми
-    address: 614113, г. Пермь, ул. Кировоградская, д. 37
+    address: 614000, г. Пермь, ул. Примерная, д. 1
     territory:                       # адреса, подсудные суду / участку
       - city: Пермь
         streets:
-          - {street: Кировоградская, houses: "1-99"}      # "all", "1-99", "2-40 чёт", "1-39 нечёт", "5,7,9"
+          - {street: Ленина, houses: "1-99"}      # "all", "1-99", "2-40 чёт", "1-39 нечёт", "5,7,9"
 """
 from __future__ import annotations
 
@@ -110,15 +110,23 @@ class CourtRegistry:
     def by_id(self, cid: str | None) -> Court | None:
         return next((c for c in self.courts if c.id == cid), None)
 
-    def find(self, debtor: Debtor, level: str) -> Court | None:
+    def find(self, debtor: Debtor, level: str, override: str = "") -> Court | None:
         """Суд по адресу квартиры. Для районного суда сначала определяется участок мирового судьи.
+        `override` - участок, выбранный оператором вручную («№ 3 Кировского района»).
         Причины неоднозначности складываются в `self.notes`."""
         self.notes = []
-        ms = self._find_magistrate(debtor)
+        self.candidates: list[Court] = []
+        ms = self._by_override(override) if override else None
+        if override and ms is None:
+            self.notes.append(f"участок «{override}» не найден в справочнике судов")
+        ms = ms or self._find_magistrate(debtor)
         if level == "magistrate":
             return ms
         if ms is not None and ms.parent:
             return self.by_id(ms.parent)
+        parents = {c.parent for c in self.candidates if c.parent}
+        if len(parents) == 1:  # участок неоднозначен, но все кандидаты входят в один судебный район
+            return self.by_id(next(iter(parents)))
         cands = [c for c in self.courts if c.level == "district" and _norm(debtor.city) and
                  re.search(rf"\b{re.escape(_norm(debtor.city))}", _norm(c.address))]
         if len(cands) == 1:
@@ -126,6 +134,12 @@ class CourtRegistry:
         if cands:
             self.notes.append("несколько районных судов в населённом пункте: " + "; ".join(c.name for c in cands))
         return None
+
+    def _by_override(self, text: str) -> Court | None:
+        key = re.sub(r"\s+", " ", text.lower().replace("ё", "е")).strip()
+        hits = [c for c in self.courts if c.level == "magistrate" and key in re.sub(
+            r"\s+", " ", c.name.lower().replace("ё", "е"))]
+        return hits[0] if len(hits) == 1 else None
 
     def _find_magistrate(self, debtor: Debtor) -> Court | None:
         city, street = _norm(debtor.city), _norm(debtor.street)
@@ -144,7 +158,8 @@ class CourtRegistry:
         # 2. описание границ текстом: населённый пункт (+ улица) должны встречаться в тексте
         if not city:
             return None
-        rx_city = re.compile(rf"(?<![а-яё]){re.escape(city[:max(len(city) - 1, 4)])}", re.I)
+        stem = city[:-1] if len(city) > 5 else city
+        rx_city = re.compile(rf"(?<![а-яё]){re.escape(stem)}[а-яё]{{0,2}}(?![а-яё])", re.I)  # «Пермь», не «Пермский»
         cands = [c for c in mags if rx_city.search(c.territory_text.lower().replace("ё", "е"))]
         if street and len(cands) > 1:
             rx_st = re.compile(rf"(?<![а-яё]){re.escape(street.split()[0][:max(len(street.split()[0]) - 2, 4)])}", re.I)
@@ -153,6 +168,7 @@ class CourtRegistry:
         if len(cands) == 1:
             self.notes.append(f"участок определён по тексту описания границ — проверьте: {cands[0].name}")
             return cands[0]
+        self.candidates = cands
         if cands:
             self.notes.append("не удалось однозначно определить участок мирового судьи; кандидаты: "
                               + "; ".join(c.name for c in cands[:6]))

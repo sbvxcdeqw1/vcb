@@ -6,7 +6,7 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from ..models import CHARGE, OPENING, PAYMENT, Account, Entry
+from ..models import CHARGE, OPENING, PAYMENT, PENALTY, Account, Entry
 from ..money import D
 from .onec import ParseError, _rows, classify_category
 
@@ -33,11 +33,14 @@ def parse_chess(path: str | Path, rows: list[list] | None = None) -> Account:
         cells = [str(c).strip() for c in r if c not in (None, "")]
         if len(cells) == 1 and not cells[0].startswith(("Шахматка", "за период", "Услуга")):
             if not acc.number:
-                acc.number = cells[0]  # «551010009822, МО г.Перми»
+                acc.number = cells[0]  # «100000000001, МО г.Перми»
             elif not acc.address:
                 acc.address = cells[0]
-    num, _, org = acc.number.partition(",")
-    acc.number, acc.owner = num.strip(), ""
+    num, _, rest = acc.number.partition(",")
+    acc.number = num.strip()
+    # после номера лицевого счёта - либо организация («МО г.Перми»), либо ФИО собственника («Иванов Иван Иванович»)
+    rest = rest.strip()
+    acc.owner = rest if re.fullmatch(r"[А-ЯЁ][а-яё\-]+(?: [А-ЯЁ][а-яё\-]+){1,2}", rest) else ""
     hdr = next((i for i, r in enumerate(rows) if r and str(r[0] or "").strip() == "Услуга"), None)
     if hdr is None:
         raise ParseError(f"{path.name}: не найдена строка «Услуга»")
@@ -68,6 +71,7 @@ def parse_chess(path: str | Path, rows: list[list] | None = None) -> Account:
         if name.lower().startswith("итог"):
             break
         cat = classify_category(name)
+        is_penalty = bool(re.match(r"\s*пен[иь]", name, re.I))  # строка «Пени» шахматки - пени 1С, не долг
         opening = D(r[next(j for j, (c, _) in cols.items() if c == "opening")] or 0) if any(
             c == "opening" for c, _ in cols.values()) else D(0)
         charged = paid = D(0)
@@ -78,12 +82,12 @@ def parse_chess(path: str | Path, rows: list[list] | None = None) -> Account:
             amount = D(v)
             when = _month_end(*c)
             if kind == "Оплата" or amount < 0 and kind != "Начислено":
-                acc.entries.append(Entry(when, PAYMENT, cat, name, abs(amount)))
+                acc.entries.append(Entry(when, PENALTY if is_penalty else PAYMENT, cat, name, abs(amount)))
                 paid += abs(amount)
             else:
-                acc.entries.append(Entry(when, CHARGE, cat, name, amount))
+                acc.entries.append(Entry(when, PENALTY if is_penalty else CHARGE, cat, name, amount))
                 charged += amount
-        if opening:
+        if opening and not is_penalty:
             first = min((c for c, _ in cols.values() if isinstance(c, tuple)), default=None)
             when = _month_end(*first) - timedelta(days=_month_end(*first).day)  # конец предыдущего месяца
             acc.entries.append(Entry(when, OPENING, cat, name, opening))
@@ -105,6 +109,8 @@ def list_services(path: str | Path) -> list[tuple[str, "Decimal"]]:
     acc = parse_chess(path, rows)
     order: dict[str, Decimal] = {}
     for e in acc.entries:
+        if e.kind == PENALTY:  # строка «Пени» - не услуга, пени считаются заново
+            continue
         order.setdefault(e.purpose, Decimal(0))
         if e.kind == CHARGE:
             order[e.purpose] += e.amount

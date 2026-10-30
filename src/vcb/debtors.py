@@ -41,7 +41,7 @@ def debtor_from_row(row: dict) -> Debtor:
 
 
 def debtor_from_account(acc: Account, default_city: str = "") -> Debtor:
-    """«Пермь г, Кировоградская, д.180,  24» -> город, улица, дом, квартира (best effort)."""
+    """«Пермь г, Ленина, д.10,  5» -> город, улица, дом, квартира (best effort)."""
     parts = [p.strip() for p in acc.address.split(",") if p.strip()]
     d = Debtor(fio=acc.owner, account=acc.number, city=default_city)
     if parts:
@@ -49,8 +49,12 @@ def debtor_from_account(acc: Account, default_city: str = "") -> Debtor:
         if m:
             d.city = m.group(1).strip().capitalize() if m.group(1).isupper() else m.group(1).strip()
             parts = parts[1:]
+    if parts and not re.search(r"\d|\b(ул|пр|пер|проезд|б-р|ш|д|кв)\b\.?", parts[0], re.I) \
+            and len(parts) > 1:
+        d.city = parts[0].capitalize() if parts[0].isupper() else parts[0]  # «ПЕРМЬ, ул.Примерная, д.1, кв. 2»
+        parts = parts[1:]
     if parts:
-        d.street = parts[0]
+        d.street = re.sub(r"^(ул|улица|пр-кт|пер|проезд|б-р|ш)\.\s*", lambda m: m.group(1) + ". ", parts[0], flags=re.I)
     for p in parts[1:]:
         m = re.match(r"д\.?\s*(\S+)", p)
         if m:

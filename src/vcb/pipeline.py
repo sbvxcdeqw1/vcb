@@ -131,7 +131,7 @@ def _grid_entries(entries, lines, cat) -> list[Entry]:
     return out
 
 
-def _card_rows(entries, ignored) -> list[tuple]:
+def _card_rows(entries, ignored, cat=SERVICES) -> list[tuple]:
     """Строки карточки расчёта: начисления по месяцам (все услуги вместе) и оплаты, вошедшие в расчёт."""
     skip = {ref for ref, _, _ in ignored}
     charges: dict[tuple, Decimal] = {}
@@ -148,7 +148,8 @@ def _card_rows(entries, ignored) -> list[tuple]:
             else:
                 folded[e.date] = folded.get(e.date, Decimal(0)) + e.amount
     for (y, m), amount in charges.items():
-        rows.append((month_end(y, m), f"Начисление за {MONTH_NAMES[m - 1]} {y}", "Начисление за услуги", amount,
+        rows.append((month_end(y, m), f"Начисление за {MONTH_NAMES[m - 1]} {y}",
+                     "Начисление взносов" if cat == CAPREPAIR else "Начисление за услуги", amount,
                      Decimal(0)))
     for d, amount in folded.items():
         rows.append((d, "Оплата по данным шахматки", "Оплата", Decimal(0), amount))
@@ -228,6 +229,8 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     for f in ("fio", "city", "street", "house", "flat", "account"):  # пустое в реестре - берём из шапки выгрузки
         if not getattr(debtor, f):
             setattr(debtor, f, getattr(auto, f))
+    if not debtor.fio:
+        debtor.fio = next((a.owner for _, a, _ in loaded if a.owner), "")
     case = Case(primary, debtor, profile["claimant"], profile["representative"], date.max, date.min, as_of)
     several = len(packages) > 1
     for pkg, acc, removed in loaded:
@@ -263,6 +266,10 @@ def _process_package(case: Case, pkg: Package, acc, removed, row, cfg, as_of, pe
         note("из расчёта исключены услуги: " + "; ".join(removed))
     for w in acc.warnings:
         note(w)
+    own_penalty = sum((e.amount for e in acc.entries if e.kind == PENALTY and norm_service(e.purpose).startswith("пен")),
+                      Decimal(0))
+    if own_penalty:
+        note(f"строка «Пени» шахматки ({fmt_money(own_penalty)} руб.) в расчёт не входит: пени считаются заново")
     opening_total = sum((e.amount for e in acc.entries if e.kind == OPENING), Decimal(0))
     if opening_total:
         note(f"сальдо на начало ({fmt_money(opening_total)} руб.) в расчёт не входит")
@@ -287,7 +294,7 @@ def _process_package(case: Case, pkg: Package, acc, removed, row, cfg, as_of, pe
     res.account, res.period_from, res.period_to = acc, p_from, p_to
     res.payments, res.excluded_services = pays, removed
     res.grid_entries = _grid_entries(entries, lines, cat)
-    res.card_rows = _card_rows(entries, ignored)
+    res.card_rows = _card_rows(entries, ignored, cat)
     if ignored:
         note(f"{len(ignored)} оплат(ы) на {fmt_money(sum((a for _, a, _ in ignored), Decimal(0)))} руб. "
              f"отнесены к периодам до начала расчёта и не учтены")
@@ -323,7 +330,7 @@ def _choose_court(case: Case, cfg: dict, registry: CourtRegistry | None):
             level = "magistrate" if price <= D(c["magistrate_claim_limit"]) else "district"
     case.court_level = level
     case.fee = state_fee(price, cfg, level=level, order=(kind == "order"))
-    court = registry.find(case.debtor, level) if registry else None
+    court = registry.find(case.debtor, level, str(case.debtor.extra.get("court", ""))) if registry else None
     if registry:
         case.notes += registry.notes
     if court:

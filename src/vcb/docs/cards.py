@@ -17,7 +17,7 @@ def _lines(case: Case, res: CategoryResult, title: str) -> list[tuple[str, str]]
     category = res.category
     org = case.claimant.short_name or case.claimant.name or "Взыскатель: ____________________"
     what = (f"по услугам: {CATEGORY_TITLES[category]}" if category != CAPREPAIR
-            else "по взносам на капитальный ремонт")
+            else f"по лицевому счёту {(res.account or case.account).number}")
     lines = [(org, "org"), (title.upper(), "title"), (what, "center"),
              (f"за период с {res.period_from:%d.%m.%Y} по {res.period_to:%d.%m.%Y}, "
               f"по состоянию на {case.as_of:%d.%m.%Y}", "center"), ("", "gap"),
