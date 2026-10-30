@@ -443,3 +443,33 @@ def test_court_override_and_common_district():
     assert reg.find(d, "magistrate") is None and len(reg.candidates) == 2
     assert reg.find(d, "district").name == "Тестовый районный суд г. Перми"  # все кандидаты - одного района
     assert "№ 2 Тестового района" in reg.find(d, "magistrate", "№ 2 Тестового района").name
+
+
+def test_register_filter_by_lettered_account():
+    from vcb.parsers.payments import Payment, filter_by_account
+
+    mk = lambda i, info: Payment(f"П{i}", date(2025, 1, i), Decimal("1"), info)
+    pays = [mk(1, "00000005, Иванов (л/с) / оплата"), mk(2, "00000009, Петров (л/с) / оплата"), mk(3, "К05, Иванов")]
+    own, other = filter_by_account(pays, "К05")
+    assert [p.ref for p in own] == ["П1", "П3"] and other == 1
+    assert filter_by_account(pays, "Х77")[0] == pays  # счёт не найден - реестр не фильтруется
+
+
+@pytest.mark.skipif(not (KR_REAL.exists() and (Path(__file__).parent.parent / "examples" / "oplaty_kr.xls").exists()),
+                    reason="нет примеров капремонта")
+def test_real_caprepair_register_is_enforcement_only():
+    from vcb.config import load_config
+    from vcb.models import CAPREPAIR, Party
+    from vcb.parsers.payments import ENFORCEMENT, classify, parse_registers
+    from vcb.pipeline import build_case
+
+    reg = Path(__file__).parent.parent / "examples" / "oplaty_kr.xls"
+    pays = parse_registers(reg)
+    classify(pays, load_config())
+    assert pays and all(p.kind == ENFORCEMENT and not p.include for p in pays)  # «Погашение долга… Исполнительный лист»
+    prof = {"claimant": Party(), "representative": Party(), "legal": {}}
+    plain = build_case(KR_REAL, None, prof, load_config(), date(2026, 10, 30), None, category=CAPREPAIR)
+    paid = build_case(KR_REAL, None, prof, load_config(), date(2026, 10, 30), None, (None, None), reg,
+                      category=CAPREPAIR)
+    assert paid.results[CAPREPAIR].debt == plain.results[CAPREPAIR].debt  # оплаты по ИП долг не уменьшают
+    assert len(paid.results[CAPREPAIR].skipped) == len(pays)

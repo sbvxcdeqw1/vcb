@@ -124,9 +124,18 @@ def filter_by_account(pays: list[Payment], number: str) -> tuple[list[Payment], 
     Если в реестре нет ни одного платежа с лицевым счётом в начале назначения - возвращает всё без изменений."""
     if not number:
         return pays, 0
-    if not number.isdigit():  # «К01»: лицевой счёт с буквами - отбираем платежи, назначение которых с него начинается
-        mine = [p for p in pays if re.match(rf"^\s*{re.escape(number)}\b", p.info, re.I)]
-        return (mine, len(pays) - len(mine)) if mine else (pays, 0)
+    if not number.isdigit():
+        # «К05»: лицевой счёт с буквами. В реестре он может быть записан так же или цифрами с нулями («00000005»)
+        digits = re.sub(r"\D", "", number)
+
+        def mine(p: Payment) -> bool:
+            if re.match(rf"^\s*{re.escape(number)}\b", p.info, re.I):
+                return True
+            m = LEAD_ACCOUNT.match(p.info)
+            return bool(m and digits and int(m.group(1)) == int(digits))
+
+        own = [p for p in pays if mine(p)]
+        return (own, len(pays) - len(own)) if own else (pays, 0)
     attributed = [p for p in pays if LEAD_ACCOUNT.match(p.info)]
     if not attributed:
         return pays, 0
