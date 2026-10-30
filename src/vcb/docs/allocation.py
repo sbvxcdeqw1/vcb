@@ -29,13 +29,14 @@ def write_allocation(path, case: Case, res):
     org = case.claimant.short_name or case.claimant.name
     hdr = title_block(ws, 10, ([(org, "org")] if org else []) + [
         ("РАЗНОСКА ОПЛАТ", "title"),
-        (f"{case.debtor.fio or case.account.owner}, лицевой счёт {case.account.number}", "center"),
+        (f"{case.debtor.fio or (res.account or case.account).owner}, лицевой счёт "
+         f"{(res.account or case.account).number}", "center"),
         ("", "gap")], width_chars=150)
     header_row(ws, hdr, ["№", "Дата", "Сумма, руб.", "Тип платежа", "Зачтено", "Основание", "Период по назначению",
                          "Разнесено на", "Примечание", "Назначение платежа"], height=32)
     first_data = hdr + 1
     r = first_data
-    for p in sorted(case.payments, key=lambda p: (p.date, p.ref)):
+    for p in sorted(res.payments, key=lambda p: (p.date, p.ref)):
         parts = refs.get(p.ref, [])
         put(ws, f"A{r}", p.ref, border=True)
         put(ws, f"B{r}", p.date, border=True, fmt="DD.MM.YYYY")
@@ -81,12 +82,12 @@ def write_allocation(path, case: Case, res):
 
     w3 = wb.create_sheet("Сценарии")
     header_row(w3, 1, ["Вариант учёта оплат", "Долг, руб.", "Пени, руб.", "Итого, руб."], height=24)
-    for r, (name, debt, pen) in enumerate(case.scenarios, 2):
+    for r, (name, debt, pen) in enumerate(res.scenarios, 2):
         put(w3, f"A{r}", name, border=True)
         put(w3, f"B{r}", debt, border=True, fmt=MONEY)
         put(w3, f"C{r}", pen, border=True, fmt=MONEY)
         put(w3, f"D{r}", f"=B{r}+C{r}", border=True, fmt=MONEY)
-    n = len(case.scenarios) + 3
+    n = len(res.scenarios) + 3
     put(w3, f"A{n}", "Принято в заявлении (с учётом настроек и ручных решений)", bold=True, border=True)
     put(w3, f"B{n}", res.debt, bold=True, border=True, fmt=MONEY)
     put(w3, f"C{n}", res.penalty, bold=True, border=True, fmt=MONEY)

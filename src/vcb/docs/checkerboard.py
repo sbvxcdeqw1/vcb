@@ -15,7 +15,7 @@ from openpyxl.utils import get_column_letter as L
 from openpyxl.worksheet.pagebreak import Break
 
 from .. import __version__
-from ..models import CHARGE, PAYMENT
+from ..models import CAPREPAIR, CHARGE, PAYMENT
 from .context import Case
 from .xlsx_util import CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, setup_print, signature_block, title_block, widths
 from .xlsx_util import put as _put
@@ -27,9 +27,13 @@ NCOLS = 2 + MONTHS_PER_BLOCK * 2  # A:B - услуга, дальше пары «
 PAGE_HEIGHT = 760  # пунктов листа на страницу при печати (с запасом на масштаб по ширине)
 
 
-def write_checkerboard(path, case: Case):
-    grid = [e for res in case.results.values() for e in res.grid_entries]
-    entries = [e for e in (grid or case.account.entries) if e.kind in (CHARGE, PAYMENT) and e.date <= case.as_of]
+def write_checkerboard(path, case: Case, res=None):
+    """Шахматка одного пакета (ЖКУ или капитальный ремонт); без `res` - по всем пакетам вместе."""
+    results = [res] if res else list(case.results.values())
+    grid = [e for r_ in results for e in r_.grid_entries]
+    entries = [e for e in grid if e.kind in (CHARGE, PAYMENT) and e.date <= case.as_of]
+    account = (res.account if res and res.account else case.account)
+    caprepair = bool(res and res.category == CAPREPAIR)
     if not entries:
         return
     services = list(OrderedDict.fromkeys(e.purpose for e in entries))
@@ -49,13 +53,14 @@ def write_checkerboard(path, case: Case):
 
     org = case.claimant.short_name or case.claimant.name
     lines = ([(org, "org")] if org else []) + [
-        ("РАСЧЁТ НАЧИСЛЕНИЙ И ОПЛАТ ПО УСЛУГАМ", "title"),
+        ("РАСЧЁТ НАЧИСЛЕНИЙ И ОПЛАТ ВЗНОСОВ НА КАПИТАЛЬНЫЙ РЕМОНТ" if caprepair else
+         "РАСЧЁТ НАЧИСЛЕНИЙ И ОПЛАТ ПО УСЛУГАМ", "title"),
         (f"за период {MONTHS[months[0][1] - 1].lower()} {months[0][0]} г. – {MONTHS[months[-1][1] - 1].lower()} "
          f"{months[-1][0]} г.", "center"), ("", "gap"),
-        (f"Лицевой счёт: {case.account.number}", "left"),
-        (f"Адрес: {case.debtor.address or case.account.address}", "left")]
-    if case.debtor.fio or case.account.owner:
-        lines.append((f"Собственник: {case.debtor.fio or case.account.owner}", "left"))
+        (f"Лицевой счёт: {account.number}", "left"),
+        (f"Адрес: {case.debtor.address or account.address}", "left")]
+    if case.debtor.fio or account.owner:
+        lines.append((f"Собственник: {case.debtor.fio or account.owner}", "left"))
     lines.append(("", "gap"))
     r = title_block(ws, NCOLS, lines, width_chars=100)
     used = sum(ws.row_dimensions[i].height or 15 for i in range(1, r))  # высота напечатанного на странице, пт

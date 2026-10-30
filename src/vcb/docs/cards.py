@@ -13,16 +13,17 @@ from .xlsx_util import (LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, s
                         widths)
 
 
-def _lines(case: Case, title: str, category: str) -> list[tuple[str, str]]:
+def _lines(case: Case, res: CategoryResult, title: str) -> list[tuple[str, str]]:
+    category = res.category
     org = case.claimant.short_name or case.claimant.name or "Взыскатель: ____________________"
     what = (f"по услугам: {CATEGORY_TITLES[category]}" if category != CAPREPAIR
             else "по взносам на капитальный ремонт")
     lines = [(org, "org"), (title.upper(), "title"), (what, "center"),
-             (f"за период с {case.period_from:%d.%m.%Y} по {case.period_to:%d.%m.%Y}, "
+             (f"за период с {res.period_from:%d.%m.%Y} по {res.period_to:%d.%m.%Y}, "
               f"по состоянию на {case.as_of:%d.%m.%Y}", "center"), ("", "gap"),
-             (f"Адрес: {case.debtor.address or case.account.address}", "left")]
-    if case.debtor.fio or case.account.owner:
-        lines.append((f"Собственник: {case.debtor.fio or case.account.owner}", "left"))
+             (f"Адрес: {case.debtor.address or (res.account or case.account).address}", "left")]
+    if case.debtor.fio or (res.account or case.account).owner:
+        lines.append((f"Собственник: {case.debtor.fio or (res.account or case.account).owner}", "left"))
     if case.debtor.area:
         lines.append((f"Общая площадь квартиры: {case.debtor.area} кв. м", "left"))
     lines.append(("", "gap"))
@@ -35,7 +36,8 @@ def write_calc_card(path, case: Case, res: CategoryResult):
     wb = Workbook()
     ws = wb.active
     ws.title = "Карточка расчёта"
-    lines = _lines(case, "Расчёт задолженности собственника жилья", res.category)
+    lines = _lines(case, res, "Расчёт задолженности собственника жилья" if res.category != CAPREPAIR else
+                   "Расчёт задолженности по взносам на капитальный ремонт")
     hdr = title_block(ws, 5, lines)
     header_row(ws, hdr, ["Дата", "Регистратор", "Операция", "Начислено, руб.", "Оплата, руб."])
     r = hdr + 1
@@ -104,7 +106,8 @@ def write_penalty_card(path, case: Case, res: CategoryResult):
     wb = Workbook()
     ws = wb.active
     ws.title = "Расчет пени"
-    hdr = title_block(ws, 12, _lines(case, "Расчёт пени по задолженности собственника жилья", res.category))
+    hdr = title_block(ws, 12, _lines(case, res, "Расчёт пени по задолженности собственника жилья" if res.category != CAPREPAIR
+                                     else "Расчёт пени по задолженности по взносам на капитальный ремонт"))
     header_row(ws, hdr, ["Месяц", "Начислено за месяц, руб.", "Подлежит оплате до", "Дата оплаты", "Сумма оплаты, руб.",
                          "Ставка ЦБ, %", "Делитель", "Доля ставки", "Расчётная сумма, руб.", "Период просрочки",
                          "Количество дней", "Сумма пени, руб."], height=44)

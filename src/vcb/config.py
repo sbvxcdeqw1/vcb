@@ -32,8 +32,11 @@ def _d(v) -> date:
     return v if isinstance(v, date) else date.fromisoformat(str(v))
 
 
-def rules_from(cfg: dict) -> tuple[PenaltyRules, RateTable]:
-    p = cfg["penalty"]
+def rules_from(cfg: dict, category: str = "services") -> tuple[PenaltyRules, RateTable]:
+    """Правила пени. Для взносов на капремонт (`caprepair`) поверх общих накладываются penalty.caprepair."""
+    p = dict(cfg["penalty"])
+    if category == "caprepair":
+        p.update(cfg["penalty"].get("caprepair") or {})
     rules = PenaltyRules(mode=p["mode"], divisor1=p["divisor1"], divisor2=p["divisor2"], tier1_days=p["tier1_days"],
                          due_day=p["due_day"], include_payment_day=p["include_payment_day"],
                          moratoria=[(_d(a), _d(b)) for a, b in p.get("moratoria") or []])

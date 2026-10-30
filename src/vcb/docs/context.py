@@ -24,6 +24,12 @@ class CategoryResult:
     card_rows: list = field(default_factory=list)  # строки карточки: (дата, регистратор, операция, начислено, оплата)
     skipped: list = field(default_factory=list)  # платежи, не вошедшие в расчёт: (дата, сумма, причина)
     all_lines: list = field(default_factory=list)  # включая начальный остаток и периоды вне заявления
+    account: Account | None = None  # лицевой счёт пакета (у ЖКУ и капремонта они разные)
+    period_from: date | None = None  # расчётный период пакета
+    period_to: date | None = None
+    payments: list = field(default_factory=list)  # оплаты из реестра пакета (parsers.payments.Payment)
+    scenarios: list = field(default_factory=list)  # (название, долг, пени) при разных решениях по оплатам
+    excluded_services: list = field(default_factory=list)  # услуги, снятые оператором с расчёта
 
     @property
     def total(self) -> Decimal:
@@ -49,9 +55,10 @@ class Case:
     legal_contract: str = ""  # «№ 25-25/юр от 27.06.2025г.»
     legal_executor: str = ""  # «ООО «СВТ»»
     notes: list[str] = field(default_factory=list)  # предупреждения для сводки
-    payments: list = field(default_factory=list)  # оплаты из реестра (parsers.payments.Payment)
-    excluded_services: list = field(default_factory=list)  # услуги, снятые оператором с расчёта
-    scenarios: list = field(default_factory=list)  # (название, долг, пени) при разных решениях по оплатам
+
+    @property
+    def categories(self) -> list[str]:
+        return list(self.results)
 
     @property
     def debt(self) -> Decimal:

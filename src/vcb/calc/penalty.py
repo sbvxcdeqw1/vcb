@@ -116,6 +116,14 @@ def _segments(due: date, last: date, rules: PenaltyRules) -> list[tuple[date, da
     return out
 
 
+def _join_equal(segs: list, rules: PenaltyRules) -> list:
+    """Если обе ставки совпадают (пени по капремонту: только 1/300), периоды объединяются в один."""
+    if rules.divisor1 == rules.divisor2 and len(segs) == 2:
+        (a, b, n1, d), (_, c, n2, _d) = segs
+        return [(a, c, n1 + n2, d)]
+    return segs
+
+
 def calc_penalty(lines: list[ChargeLine], as_of: date, rules: PenaltyRules, rates: RateTable) -> list[PenaltyItem]:
     items = []
     for ln in lines:
@@ -127,7 +135,7 @@ def calc_penalty(lines: list[ChargeLine], as_of: date, rules: PenaltyRules, rate
                 rate_day = p.closed
             rate = rates.at(rate_day)
             segs = []
-            for s, e, n, div in _segments(ln.due, end, rules):
+            for s, e, n, div in _join_equal(_segments(ln.due, end, rules), rules):
                 n = max(n - _overlap(s, e, rules), 0)
                 if n:
                     segs.append(Segment(s, e, n, div, rate, p.amount, p.amount * rate / div * n / 100))

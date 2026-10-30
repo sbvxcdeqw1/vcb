@@ -231,7 +231,7 @@ def test_typography_and_print_setup(tmp_path):
     prof = {"claimant": Party(), "representative": Party(), "legal": {}}
     case = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
     write_case(case, tmp_path)
-    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат.xlsx", False)):
+    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат_ЖКУ.xlsx", False)):
         ws = load_workbook(tmp_path / name).worksheets[0]
         assert ws.page_setup.paperSize == 9 and (ws.page_setup.orientation == "landscape") == landscape
         assert ws.print_title_rows or name.startswith("Шахматка")  # шахматка: блоки со своими шапками
@@ -302,7 +302,7 @@ def test_chess_plus_register_pipeline(tmp_path):
     full = build_case(CHESS, None, prof, load_config(), as_of, None, (None, None), REG98)
     less = build_case(CHESS, None, prof, load_config(), as_of, None, (None, None), REG98,
                       exclude_services="домофон;  Видеонаблюдение")
-    assert less.excluded_services == ["Домофон", "видеонаблюдение"]
+    assert less.results[SERVICES].excluded_services == ["Домофон", "видеонаблюдение"]
     assert less.results[SERVICES].debt < full.results[SERVICES].debt
     res = full.results[SERVICES]
     # карточка (начисления - оплаты) и шахматка с разнесёнными оплатами сходятся с долгом расчёта
@@ -311,8 +311,8 @@ def test_chess_plus_register_pipeline(tmp_path):
     assert sum(e.amount for e in grid if e.kind == "charge") - sum(e.amount for e in grid if e.kind == "payment") == res.debt
     files = write_case(full, tmp_path, claim=False)
     assert sorted(f.name for f in files) == ["Карточка_расчета_ЖКУ.xlsx", "Расчет_пени_ЖКУ.xlsx",
-                                              "Шахматка_с_учетом_оплат.xlsx"]
-    chess = load_workbook(tmp_path / "Шахматка_с_учетом_оплат.xlsx")
+                                              "Шахматка_с_учетом_оплат_ЖКУ.xlsx"]
+    chess = load_workbook(tmp_path / "Шахматка_с_учетом_оплат_ЖКУ.xlsx")
     assert chess.sheetnames == ["Шахматка"]  # всё на одном листе; месяцы переносятся блоками вниз
     ws = load_workbook(tmp_path / "Карточка_расчета_ЖКУ.xlsx").worksheets[0]
     heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
@@ -320,3 +320,85 @@ def test_chess_plus_register_pipeline(tmp_path):
     text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
     assert "Сальдо на" not in text and "не вошедшие" not in text and "Исключены из расчёта" not in text
     assert f"Задолженность на {as_of:%d.%m.%Y}" in text
+
+
+# ---------------------------------------------------------------- два пакета: ЖКУ + капитальный ремонт
+def make_chess(path, number, address, services: dict, months):
+    """Минимальная «Шахматка» 1С: services = {название: сумма в месяц}, months = [(год, месяц), ...]."""
+    from openpyxl import Workbook
+
+    names = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь",
+             "декабрь"]
+    ws = Workbook().active
+    ws["A2"], ws["A3"], ws["A4"], ws["A5"] = "Шахматка", "за период", f"{number}, МО г.Перми", address
+    ws["A6"], ws["C6"] = "Услуга", "Начальный остаток"
+    for j, (y, m) in enumerate(months):
+        ws.cell(6, 4 + j).value = f"{names[m - 1].capitalize()} {y}"
+        ws.cell(7, 4 + j).value = "Начислено"
+    for i, (name, amount) in enumerate(services.items()):
+        ws.cell(8 + i, 1).value = name
+        for j in range(len(months)):
+            ws.cell(8 + i, 4 + j).value = amount
+    ws.cell(8 + len(services), 1).value = "Итог:"
+    ws.parent.save(path)
+
+
+MONTHS_2024 = [(2024, m) for m in range(6, 13)] + [(2025, 1), (2025, 2)]
+
+
+def two_packages(tmp_path):
+    g, k = tmp_path / "gku_98.xlsx", tmp_path / "kr_98_other_name.xlsx"
+    make_chess(g, "551010009822", "г.ПЕРМЬ, Адмирала Ушакова, д.55/1, кв. 98", {"Содержание": 1000, "Домофон": 50},
+               MONTHS_2024)
+    make_chess(k, "991000000098", "Пермь г, Адмирала Ушакова, д.55/1, кв.98", {"Взнос на капремонт": 600}, MONTHS_2024)
+    return g, k
+
+
+def test_two_packages_combined_claim(tmp_path):
+    import docx
+
+    from vcb.config import load_config
+    from vcb.models import CAPREPAIR, Party
+    from vcb.pipeline import Package, build_case, write_case
+
+    g, k = two_packages(tmp_path)
+    prof = {"claimant": Party(short_name="ООО «Тест»", name="Общество «Тест»"), "representative": Party(), "legal": {}}
+    cfg = load_config()
+    as_of = date(2025, 4, 15)
+    both = build_case(g, None, prof, cfg, as_of, None, extra_packages=[Package(CAPREPAIR, k)])
+    only_g = build_case(g, None, prof, cfg, as_of, None)
+    only_k = build_case(k, None, prof, cfg, as_of, None, category=CAPREPAIR)
+    assert set(both.results) == {SERVICES, CAPREPAIR} and list(only_k.results) == [CAPREPAIR]
+    # логика расчёта та же: суммы объединяются, от общей суммы - цена иска и госпошлина
+    assert both.debt == only_g.debt + only_k.debt == Decimal("9450") * 1 + Decimal("5400")
+    assert both.penalty == only_g.penalty + only_k.penalty and both.price == both.debt + both.penalty
+    # пени по капремонту - только 1/300 (ч. 14.1 ст. 155 ЖК РФ), по ЖКУ - 1/300 и затем 1/130
+    assert {s.divisor for it in both.results[CAPREPAIR].penalty_items for s in it.segments} == {300}
+    assert {s.divisor for it in both.results[SERVICES].penalty_items for s in it.segments} == {300, 130}
+    files = write_case(both, tmp_path / "out")
+    names = sorted(f.name for f in files)
+    for cat in ("ЖКУ", "капремонт"):
+        assert f"Шахматка_с_учетом_оплат_{cat}.xlsx" in names and f"Карточка_расчета_{cat}.xlsx" in names
+        assert f"Расчет_пени_{cat}.xlsx" in names
+    assert sum(n.endswith(".docx") for n in names) == 1  # один общий иск/приказ
+    text = "\n".join(p.text for p in docx.Document(next((tmp_path / "out").glob("*.docx"))).paragraphs)
+    text = text.replace("\xa0", " ")
+    assert "и по оплате взносов на капитальный ремонт" in text and "статьей 169" in text and "частью 14.1 статьи 155" in text
+    assert "частью 14 статьи 155" in text and "протокола общего собрания" in text
+    text_k = "\n".join(p.text for p in docx.Document(
+        next(f for f in write_case(only_k, tmp_path / "out_k") if f.suffix == ".docx")).paragraphs).replace("\xa0", " ")
+    assert "частью 14.1 статьи 155" in text_k and "частью 14 статьи 155" not in text_k
+    assert "по оплате взносов на капитальный ремонт общего имущества" in text_k
+
+
+def test_pair_units_by_address(tmp_path):
+    from vcb.pipeline import pair_units
+
+    g, k = two_packages(tmp_path)
+    gd, kd = tmp_path / "g", tmp_path / "k"
+    gd.mkdir(), kd.mkdir()
+    g.rename(gd / "a.xlsx"), k.rename(kd / "completely_different.xlsx")
+    make_chess(kd / "alone.xlsx", "1", "г.ПЕРМЬ, Другая, д.1, кв. 5", {"Взнос": 1}, MONTHS_2024[:2])
+    units = pair_units(gd, kd)
+    assert [(a.name if a else None, b.name if b else None) for a, b in units] == [
+        ("a.xlsx", "completely_different.xlsx"), (None, "alone.xlsx")]
