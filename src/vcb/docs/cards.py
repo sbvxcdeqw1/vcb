@@ -9,7 +9,7 @@ from .. import __version__
 from ..models import CAPREPAIR, CATEGORY_TITLES, CHARGE, OPENING, PAYMENT
 from ..money import fmt as money_fmt
 from .context import Case, CategoryResult
-from .xlsx_util import (LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, signature_block, title_block,
+from .xlsx_util import (LEFT, cap, MONEY, TOTAL_FILL, header_row, put, setup_print, signature_block, title_block,
                         widths)
 
 
@@ -45,7 +45,7 @@ def write_calc_card(path, case: Case, res: CategoryResult):
     for when, registrar, purpose, charged, paid in res.card_rows:
         put(ws, f"A{r}", when, border=True, fmt="DD.MM.YYYY", align=LEFT)
         put(ws, f"B{r}", registrar, border=True, align=LEFT)
-        put(ws, f"C{r}", purpose, border=True, align=LEFT)
+        put(ws, f"C{r}", cap(purpose), border=True, align=LEFT)
         put(ws, f"D{r}", charged or None, border=True, fmt=MONEY)
         put(ws, f"E{r}", paid or None, border=True, fmt=MONEY)
         r += 1

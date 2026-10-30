@@ -17,7 +17,7 @@ from openpyxl.worksheet.pagebreak import Break
 from .. import __version__
 from ..models import CAPREPAIR, CHARGE, PAYMENT
 from .context import Case
-from .xlsx_util import CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, setup_print, signature_block, title_block, widths
+from .xlsx_util import cap, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, setup_print, signature_block, title_block, widths
 from .xlsx_util import put as _put
 
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь",
@@ -101,7 +101,7 @@ def write_checkerboard(path, case: Case, res=None):
         r = sub + 1
         r0 = r
         for svc in services:
-            put(ws, f"A{r}", svc, border=True, align=LEFT)
+            put(ws, f"A{r}", cap(svc), border=True, align=LEFT)
             put(ws, f"B{r}", None, border=True)
             ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
             ws.row_dimensions[r].height = service_height(svc)
@@ -139,7 +139,7 @@ def write_checkerboard(path, case: Case, res=None):
     r = top + 1
     r0 = r
     for svc in services:
-        put(ws, f"A{r}", svc, border=True, align=LEFT)
+        put(ws, f"A{r}", cap(svc), border=True, align=LEFT)
         put(ws, f"B{r}", None, border=True)
         ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
         ws.row_dimensions[r].height = service_height(svc)
@@ -161,7 +161,7 @@ def write_checkerboard(path, case: Case, res=None):
     ws.row_dimensions[r].height = 16
     signature_block(ws, r + 3, case, ncols=NCOLS)
 
-    widths(ws, {"A": 26, "B": 2, **{L(c): 9.4 for c in range(3, NCOLS + 1)}})
+    widths(ws, {"A": 22, "B": 2, **{L(c): 11.2 for c in range(3, NCOLS + 1)}})
     setup_print(ws, landscape=False, footer_left=f"vcb {__version__}")
     for b in breaks:
         ws.row_breaks.append(Break(id=b))

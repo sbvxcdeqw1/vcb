@@ -17,6 +17,12 @@ RIGHT = Alignment(horizontal="right", vertical="center")
 MONEY = "#,##0.00"
 
 
+def cap(text):
+    """Название с заглавной буквы: «содержание жилья» -> «Содержание жилья»."""
+    text = str(text or "").strip()
+    return text[:1].upper() + text[1:]
+
+
 def put(ws, ref, value, *, bold=False, border=False, align=None, fmt=None, size=10, fill=None):
     c = ws[ref]
     c.value = value

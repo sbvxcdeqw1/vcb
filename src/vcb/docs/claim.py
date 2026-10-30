@@ -279,7 +279,7 @@ def write_claim(path, case: Case):
         items += [f"Копия договора {_val(case.legal_contract)} - 1 экз.",
                   "Копия платежного поручения об оплате юридических услуг"]
     for n, t in enumerate(items, 1):
-        _p(d, f"{n}. {t}", indent=False, hanging=Cm(0.9), single=True, after=2, keep_next=(n == len(items)))
+        _p(d, f"{n}. {t[:1].upper() + t[1:]}", indent=False, hanging=Cm(0.9), single=True, after=2, keep_next=(n == len(items)))
     who = f"Представитель {cname}" if rep.name or rep.sign_name else f"Взыскатель {cname}"
     _p(d, "", indent=False, after=6, keep_next=True)
     _signature(d, who, f"_______________ {_val(rep.sign_name or c.sign_name, '________')}")
