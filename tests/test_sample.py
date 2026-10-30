@@ -234,7 +234,7 @@ def test_typography_and_print_setup(tmp_path):
     for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат.xlsx", False)):
         ws = load_workbook(tmp_path / name).worksheets[0]
         assert ws.page_setup.paperSize == 9 and (ws.page_setup.orientation == "landscape") == landscape
-        assert ws.print_title_rows
+        assert ws.print_title_rows or name.startswith("Шахматка")  # шахматка: блоки со своими шапками
     import docx
 
     doc = docx.Document(next(tmp_path.glob("*.docx")))
@@ -312,6 +312,8 @@ def test_chess_plus_register_pipeline(tmp_path):
     files = write_case(full, tmp_path, claim=False)
     assert sorted(f.name for f in files) == ["Карточка_расчета_ЖКУ.xlsx", "Расчет_пени_ЖКУ.xlsx",
                                               "Шахматка_с_учетом_оплат.xlsx"]
+    chess = load_workbook(tmp_path / "Шахматка_с_учетом_оплат.xlsx")
+    assert chess.sheetnames == ["Шахматка"]  # всё на одном листе; месяцы переносятся блоками вниз
     ws = load_workbook(tmp_path / "Карточка_расчета_ЖКУ.xlsx").worksheets[0]
     heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
     assert "Задолженность, руб." in heads
