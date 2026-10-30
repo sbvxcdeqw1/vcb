@@ -316,7 +316,7 @@ def test_chess_plus_register_pipeline(tmp_path):
     assert chess.sheetnames == ["Шахматка"]  # всё на одном листе; месяцы переносятся блоками вниз
     ws = load_workbook(tmp_path / "Карточка_расчета_ЖКУ.xlsx").worksheets[0]
     heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
-    assert "Задолженность, руб." in heads
+    assert heads == ["Начислено, руб."]  # столбца нарастающей «Задолженность» в карточке нет
     text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
     assert "Сальдо на" not in text and "не вошедшие" not in text and "Исключены из расчёта" not in text
     assert f"Задолженность на {as_of:%d.%m.%Y}" in text
