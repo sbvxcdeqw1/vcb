@@ -98,8 +98,8 @@ def printable(ws, landscape=True):
 
 
 def signature_block(ws, row: int, case, ncols: int = 3) -> int:
-    """Поле подписи под таблицей: должность и организация, линия для подписи с расшифровкой, ФИО представителя
-    (как заданы в окне программы), дата. Блок занимает `ncols` левых столбцов. Возвращает следующую свободную строку."""
+    """Поле подписи под таблицей: должность и организация, линия для подписи с расшифровкой (как задана в окне
+    программы), дата. Блок занимает `ncols` левых столбцов. Возвращает следующую свободную строку."""
     org = case.claimant.short_name or case.claimant.name or "____________________"
     rep = case.representative
     who = "Представитель" if (rep.name or rep.sign_name) else "Взыскатель"
@@ -107,8 +107,6 @@ def signature_block(ws, row: int, case, ncols: int = 3) -> int:
     last = get_column_letter(ncols)
     rows = [(f"{who} {org}", Font(name=FONT_NAME, size=10, bold=True), 28),
             (f"_____________________ / {sign} /", NORMAL, 20),
-            ((f"(подпись)          ({rep.name})" if rep.name else "(подпись)          (расшифровка)"),
-             Font(name=FONT_NAME, size=8, italic=True, color="666666"), 14),
             ("Дата: «____» ______________ 20____ г.", NORMAL, 18)]
     for i, (text, font, height) in enumerate(rows):
         r = row + i

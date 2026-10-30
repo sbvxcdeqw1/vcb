@@ -261,8 +261,8 @@ def test_every_xlsx_has_signature_block_with_representative(tmp_path):
     for f in files:
         for ws in load_workbook(f).worksheets:
             text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
-            assert "Представитель ООО «Тест»" in text and "/ П.П.Петров /" in text and "(Петров Пётр Петрович)" in text, \
-                f"{f.name}/{ws.title}"
+            assert "Представитель ООО «Тест»" in text and "/ П.П.Петров /" in text, f"{f.name}/{ws.title}"
+            assert "(подпись)" not in text and "Тело долга и оплаты" not in text, f"{f.name}/{ws.title}"
 
 
 def test_split_proportional_keeps_cents():

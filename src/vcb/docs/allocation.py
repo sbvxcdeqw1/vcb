@@ -30,8 +30,7 @@ def write_allocation(path, case: Case, res):
     hdr = title_block(ws, 10, ([(org, "org")] if org else []) + [
         ("РАЗНОСКА ОПЛАТ", "title"),
         (f"{case.debtor.fio or case.account.owner}, лицевой счёт {case.account.number}", "center"),
-        ("Оплата идёт на период из назначения платежа, остаток и оплаты без периода — на самые ранние долги; "
-         "платежи по исполнительному производству в зачёт не берутся.", "left"), ("", "gap")], width_chars=150)
+        ("", "gap")], width_chars=150)
     header_row(ws, hdr, ["№", "Дата", "Сумма, руб.", "Тип платежа", "Зачтено", "Основание", "Период по назначению",
                          "Разнесено на", "Примечание", "Назначение платежа"], height=32)
     first_data = hdr + 1

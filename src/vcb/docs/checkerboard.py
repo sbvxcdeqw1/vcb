@@ -66,7 +66,7 @@ def _grid(ws, case, entries, services, start: tuple[int, int], end: tuple[int, i
     ncols_est = 3 + sum(2 if ym in has_pay else 1 for ym in months) + 3
     org = case.claimant.short_name or case.claimant.name
     head_lines = ([(org, "org")] if org else []) + [
-        ("ШАХМАТКА НАЧИСЛЕНИЙ И ОПЛАТ ПО УСЛУГАМ", "title"),
+        ("РАСЧЁТ НАЧИСЛЕНИЙ И ОПЛАТ ПО УСЛУГАМ", "title"),
         (f"за период {MONTHS[months[0][1] - 1].lower()} {months[0][0]} г. – {MONTHS[months[-1][1] - 1].lower()} "
          f"{months[-1][0]} г.", "center"), ("", "gap"),
         (f"Лицевой счёт: {case.account.number}", "left"),
