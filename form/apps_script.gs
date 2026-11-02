@@ -10,7 +10,7 @@
  */
 var SETTINGS = [
   ['День начала приёма', 20, 'число месяца, включительно'],
-  ['День окончания приёма', 25, 'число месяца, включительно'],
+  ['День окончания приёма', 25, 'включительно; если меньше дня начала — окно переходит на следующий месяц (28 → 3)'],
   ['Приём включён', 'ДА', 'ДА / НЕТ — аварийный выключатель, перекрывает даты'],
   ['Всего квартир', 100, 'допустимые номера: 1..N; 0 — не проверять'],
   ['Текст при закрытом окне', 'Показания принимаются с {start} по {end} число каждого месяца.', '{start} и {end} подставляются сами']
@@ -33,9 +33,14 @@ function settings_() {
 }
 function status_() {
   var s = settings_(), tz = SpreadsheetApp.getActive().getSpreadsheetTimeZone();
-  var day = +Utilities.formatDate(new Date(), tz, 'd');
-  var open = s.on && day >= s.start && day <= s.end;
+  var now = new Date(), day = +Utilities.formatDate(now, tz, 'd');
+  var wrap = s.start > s.end;                       // окно через границу месяцев
+  var inWin = wrap ? (day >= s.start || day <= s.end) : (day >= s.start && day <= s.end);
+  var open = s.on && inWin;
+  // Период = месяц, в котором окно началось: показания 1–3 ноября относятся к октябрю.
+  var ref = (wrap && day <= s.end) ? new Date(now.getFullYear(), now.getMonth() - 1, 15) : now;
   return { open: open, start: s.start, end: s.end, flats: s.flats,
+           period: Utilities.formatDate(ref, tz, 'yyyy-MM'),
            message: open ? '' : s.closedText.replace('{start}', s.start).replace('{end}', s.end) };
 }
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
@@ -56,7 +61,7 @@ function doPost(e) {
     if (!(cold >= 0) || !(hot >= 0)) return json_({ ok: false, error: 'Показания должны быть неотрицательными числами.' });
 
     var tz = SpreadsheetApp.getActive().getSpreadsheetTimeZone(), now = new Date();
-    var period = Utilities.formatDate(now, tz, 'yyyy-MM'), stamp = Utilities.formatDate(now, tz, 'dd.MM.yyyy HH:mm');
+    var period = st.period, stamp = Utilities.formatDate(now, tz, 'dd.MM.yyyy HH:mm');
     sheet_('Журнал', ['Принято', 'Квартира', 'ХВС', 'ГВС']).appendRow([stamp, flat, cold, hot]);
 
     var sh = sheet_('Показания', HEAD), data = sh.getDataRange().getValues(), row = -1, prev = null;
