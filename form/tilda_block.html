@@ -33,11 +33,13 @@
   // ВСТАВЬТЕ адрес веб-приложения Apps Script (заканчивается на /exec):
   var URL_API = "https://script.google.com/macros/s/ВАШ_ID/exec";
 
+  var NOT_SET = URL_API.indexOf("ВАШ_ID") !== -1 || URL_API.indexOf("/exec") === -1;
   var $ = function(id){return document.getElementById(id)};
   var msg = $("vcb-msg"), btn = $("vcb-send");
   function show(cls, text){ msg.className = "msg " + cls; msg.textContent = text; }
   function num(s){ var n = parseFloat(String(s).replace(/\s/g,"").replace(",",".")); return isFinite(n) ? n : NaN; }
 
+  if (NOT_SET) console.error("Показания: в URL_API не подставлен адрес веб-приложения (должен оканчиваться на /exec).");
   fetch(URL_API).then(function(r){return r.json()}).then(function(st){
     if (st.open) { btn.disabled = false; msg.className = "msg"; }
     else show("info", st.message || "Приём показаний сейчас закрыт.");
@@ -50,13 +52,15 @@
     if (!(cold >= 0)) return show("err", "Введите показание ХВС числом.");
     if (!(hot >= 0))  return show("err", "Введите показание ГВС числом.");
     if (!confirm("Квартира " + flat + "\nХВС: " + cold + " м³\nГВС: " + hot + " м³\n\nОтправить?")) return;
+    if (NOT_SET) return show("err", "Форма не настроена: в коде блока не указан адрес веб-приложения (URL_API).");
     btn.disabled = true;
     fetch(URL_API, { method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"},
       body: JSON.stringify({ flat: flat, cold: cold, hot: hot, website: $("vcb-site").value })
     }).then(function(r){return r.json()}).then(function(res){
       if (res.ok) { show("ok", "Спасибо! Показания по квартире " + flat + " приняты."); $("vcb-cold").value = $("vcb-hot").value = ""; }
       else show("err", res.error || "Не удалось отправить.");
-    }).catch(function(){ show("err", "Нет связи. Попробуйте ещё раз позже."); })
+    }).catch(function(e){ console.error("Показания: запрос не удался", e);
+      show("err", "Нет связи с сервером приёма. Попробуйте позже или сообщите в управляющую компанию."); })
       .then(function(){ btn.disabled = false; });
   });
 })();
