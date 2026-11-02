@@ -1,0 +1,60 @@
+<!-- Блок «Показания ХВС/ГВС». Вставьте в Tilda: Block library → Other → T123 «HTML». -->
+<div id="vcb-meter" style="max-width:420px;margin:0 auto;font-family:inherit">
+  <style>
+    #vcb-meter label{display:block;margin:14px 0 4px;font-size:15px}
+    #vcb-meter input[type=text],#vcb-meter input[type=number]{width:100%;box-sizing:border-box;padding:12px;font:inherit;border:1px solid #ccc;border-radius:6px}
+    #vcb-meter .hint{font-size:12px;color:#777;margin-top:3px}
+    #vcb-meter button{width:100%;margin-top:20px;padding:14px;font:inherit;font-weight:600;color:#fff;background:#2563eb;border:0;border-radius:6px;cursor:pointer}
+    #vcb-meter button:disabled{opacity:.5;cursor:default}
+    #vcb-meter .msg{margin-top:14px;padding:12px;border-radius:6px;display:none}
+    #vcb-meter .msg.ok{display:block;background:#e6f6ec;color:#067647}
+    #vcb-meter .msg.err{display:block;background:#fdecea;color:#b42318}
+    #vcb-meter .msg.info{display:block;background:#fff4e0;color:#8a5a00}
+    #vcb-meter .hp{position:absolute;left:-9999px}
+  </style>
+  <form id="vcb-form" novalidate>
+    <label for="vcb-flat">Номер квартиры</label>
+    <input id="vcb-flat" type="number" inputmode="numeric" min="1" step="1" autocomplete="off">
+    <label for="vcb-cold">Холодная вода (ХВС), м³</label>
+    <input id="vcb-cold" type="text" inputmode="decimal" autocomplete="off" placeholder="например, 123,456">
+    <label for="vcb-hot">Горячая вода (ГВС), м³</label>
+    <input id="vcb-hot" type="text" inputmode="decimal" autocomplete="off" placeholder="например, 78,9">
+    <div class="hint">Вводите показания целиком, как на счётчике (чёрные цифры и красные после запятой).</div>
+    <input class="hp" id="vcb-site" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <button id="vcb-send" type="submit" disabled>Отправить показания</button>
+    <div class="msg" id="vcb-msg" role="status"></div>
+  </form>
+</div>
+<script>
+(function(){
+  // ВСТАВЬТЕ адрес веб-приложения Apps Script (заканчивается на /exec):
+  var URL_API = "https://script.google.com/macros/s/ВАШ_ID/exec";
+
+  var $ = function(id){return document.getElementById(id)};
+  var msg = $("vcb-msg"), btn = $("vcb-send");
+  function show(cls, text){ msg.className = "msg " + cls; msg.textContent = text; }
+  function num(s){ var n = parseFloat(String(s).replace(/\s/g,"").replace(",",".")); return isFinite(n) ? n : NaN; }
+
+  fetch(URL_API).then(function(r){return r.json()}).then(function(st){
+    if (st.open) { btn.disabled = false; msg.className = "msg"; }
+    else show("info", st.message || "Приём показаний сейчас закрыт.");
+  }).catch(function(){ btn.disabled = false; });   // нет связи с проверкой — пусть сервер решит при отправке
+
+  $("vcb-form").addEventListener("submit", function(ev){
+    ev.preventDefault();
+    var flat = parseInt($("vcb-flat").value, 10), cold = num($("vcb-cold").value), hot = num($("vcb-hot").value);
+    if (!(flat >= 1)) return show("err", "Укажите номер квартиры.");
+    if (!(cold >= 0)) return show("err", "Введите показание ХВС числом.");
+    if (!(hot >= 0))  return show("err", "Введите показание ГВС числом.");
+    if (!confirm("Квартира " + flat + "\nХВС: " + cold + " м³\nГВС: " + hot + " м³\n\nОтправить?")) return;
+    btn.disabled = true;
+    fetch(URL_API, { method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"},
+      body: JSON.stringify({ flat: flat, cold: cold, hot: hot, website: $("vcb-site").value })
+    }).then(function(r){return r.json()}).then(function(res){
+      if (res.ok) { show("ok", "Спасибо! Показания по квартире " + flat + " приняты."); $("vcb-cold").value = $("vcb-hot").value = ""; }
+      else show("err", res.error || "Не удалось отправить.");
+    }).catch(function(){ show("err", "Нет связи. Попробуйте ещё раз позже."); })
+      .then(function(){ btn.disabled = false; });
+  });
+})();
+</script>
