@@ -9,3 +9,5 @@ examples/*.xlsx
 examples/*.doc
 examples/*.docx
 form/accounts.csv
+form/meters.csv
+__pycache__/
