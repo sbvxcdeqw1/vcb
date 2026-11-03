@@ -2,12 +2,25 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap&subset=cyrillic" rel="stylesheet">
-<div id="vcb-meter" style="max-width:420px;margin:0 auto;font-family:'Montserrat',Arial,sans-serif">
+<div id="vcb-meter" style="max-width:460px;margin:0 auto;font-family:'Montserrat',Arial,sans-serif">
   <style>
+    #vcb-meter *{font-family:'Montserrat',Arial,sans-serif}
     #vcb-meter label{display:block;margin:14px 0 4px;font-size:15px}
-    #vcb-meter input[type=text],#vcb-meter input[type=number]{width:100%;box-sizing:border-box;padding:12px;font-family:'Montserrat',Arial,sans-serif;font-size:15px;border:1px solid #ccc;border-radius:6px}
+    #vcb-meter input,#vcb-meter select{width:100%;box-sizing:border-box;padding:12px;font-size:15px;border:1px solid #ccc;border-radius:6px;background:#fff}
+    #vcb-meter input.bad,#vcb-meter select.bad{border-color:#b42318}
     #vcb-meter .hint{font-size:12px;color:#777;margin-top:3px}
-    #vcb-meter button{width:100%;margin-top:20px;padding:14px;font-family:'Montserrat',Arial,sans-serif;font-size:15px;font-weight:600;color:#fff;background:#2563eb;border:0;border-radius:6px;cursor:pointer}
+    #vcb-meter .fe{font-size:12px;color:#b42318;margin-top:3px}
+    #vcb-meter .flat{margin-top:8px;padding:10px 12px;border-radius:6px;font-size:15px;display:none}
+    #vcb-meter .flat.ok{display:block;background:#e6f6ec;color:#067647;font-weight:600}
+    #vcb-meter .flat.no{display:block;background:#fdecea;color:#b42318}
+    #vcb-meter .flat.wait{display:block;background:#f2f4f7;color:#555}
+    #vcb-meter .meter{border:1px dashed #ccc;border-radius:8px;padding:2px 12px 14px;margin-top:14px}
+    #vcb-meter .meter h3{font-size:15px;margin:12px 0 0;font-weight:600}
+    #vcb-meter .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media(max-width:420px){#vcb-meter .row2{grid-template-columns:1fr}}
+    #vcb-meter .rm{float:right;background:none;border:0;color:#b42318;cursor:pointer;font-size:13px;width:auto;padding:0;margin:0}
+    #vcb-meter button.add{background:none;border:1px solid #2563eb;color:#2563eb;margin-top:14px}
+    #vcb-meter button{width:100%;margin-top:20px;padding:14px;font-size:15px;font-weight:600;color:#fff;background:#2563eb;border:0;border-radius:6px;cursor:pointer}
     #vcb-meter button:disabled{opacity:.5;cursor:default}
     #vcb-meter .msg{margin-top:14px;padding:12px;border-radius:6px;display:none}
     #vcb-meter .msg.ok{display:block;background:#e6f6ec;color:#067647}
@@ -16,13 +29,15 @@
     #vcb-meter .hp{position:absolute;left:-9999px}
   </style>
   <form id="vcb-form" novalidate>
-    <label for="vcb-flat">Номер квартиры</label>
-    <input id="vcb-flat" type="number" inputmode="numeric" min="1" step="1" autocomplete="off">
-    <label for="vcb-cold">Холодная вода (ХВС), м³</label>
-    <input id="vcb-cold" type="text" inputmode="decimal" autocomplete="off" placeholder="например, 123,456">
-    <label for="vcb-hot">Горячая вода (ГВС), м³</label>
-    <input id="vcb-hot" type="text" inputmode="decimal" autocomplete="off" placeholder="например, 78,9">
-    <div class="hint">Вводите показания целиком, как на счётчике (чёрные цифры и красные после запятой).</div>
+    <label for="vcb-acc">Лицевой счёт (12 цифр)</label>
+    <input id="vcb-acc" type="text" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="551010000000">
+    <div class="hint">Номер указан в квитанции</div>
+    <div class="flat" id="vcb-flat" role="status"></div>
+
+    <div id="vcb-rows"></div>
+    <button type="button" class="add" id="vcb-add">+ Добавить прибор учёта (ещё одна строка)</button>
+    <div class="hint">Если в квартире два прибора ХВС и ГВС (ванна и кухня), добавьте вторую строку.</div>
+
     <input class="hp" id="vcb-site" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button id="vcb-send" type="submit" disabled>Отправить показания</button>
     <div class="msg" id="vcb-msg" role="status"></div>
@@ -35,33 +50,129 @@
 
   var NOT_SET = URL_API.indexOf("ВАШ_ID") !== -1 || URL_API.indexOf("/exec") === -1;
   var $ = function(id){return document.getElementById(id)};
-  var msg = $("vcb-msg"), btn = $("vcb-send");
+  var msg = $("vcb-msg"), btn = $("vcb-send"), acc = $("vcb-acc"), flatBox = $("vcb-flat"), rowsBox = $("vcb-rows");
+  var windowOpen = true, verified = "", verifiedPlace = "", seq = 0;
   function show(cls, text){ msg.className = "msg " + cls; msg.textContent = text; }
-  function num(s){ var n = parseFloat(String(s).replace(/\s/g,"").replace(",",".")); return isFinite(n) ? n : NaN; }
 
+  // ---- значения: 00000,000 ----
+  function fmt(raw){
+    var s = String(raw).replace(/\s/g, "").replace(".", ",");
+    if (!/^\d{1,5}(,\d{1,3})?$/.test(s)) return null;
+    var p = s.split(","), dec = ((p[1] || "") + "000").slice(0, 3);
+    return p[0].replace(/^0+(?=\d)/, "") + "," + dec;
+  }
+  function clean(el){                       // при вводе оставляем только цифры и одну запятую
+    var v = el.value.replace(/\./g, ",").replace(/[^\d,]/g, "");
+    var i = v.indexOf(","); if (i >= 0) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/,/g, "");
+    el.value = v;
+  }
+  function fieldErr(el, text){
+    var e = el.parentNode.querySelector(".fe");
+    if (!text) { if (e) e.remove(); el.classList.remove("bad"); return; }
+    if (!e) { e = document.createElement("div"); e.className = "fe"; el.parentNode.appendChild(e); }
+    e.textContent = text; el.classList.add("bad");
+  }
+  function checkVal(el){
+    if (!el.value.trim()) { fieldErr(el, ""); return false; }
+    var f = fmt(el.value);
+    if (f === null) { fieldErr(el, "Проверьте подлинность значения: до 5 цифр, запятая и до 3 знаков, например 27,124"); return false; }
+    el.value = f; fieldErr(el, ""); return true;
+  }
+
+  // ---- строки приборов учёта ----
+  function rows(){ return [].slice.call(rowsBox.querySelectorAll(".meter")); }
+  function renumber(){
+    var rs = rows(), multi = rs.length > 1;
+    rs.forEach(function(r, i){
+      r.querySelector("h3").firstChild.textContent = "Прибор учёта " + (multi ? (i + 1) : "");
+      r.querySelector(".pl").style.display = multi ? "" : "none";
+      r.querySelector(".rm").style.display = (multi && i > 0) ? "" : "none";
+    });
+    $("vcb-add").style.display = multi ? "none" : "";
+  }
+  function addRow(){
+    if (rows().length >= 2) return;
+    var d = document.createElement("div"); d.className = "meter";
+    d.innerHTML = '<h3><span></span><button type="button" class="rm">удалить</button></h3>' +
+      '<div class="pl"><label>Где установлен *</label><select class="m-place"><option value="">— выберите —</option><option value="ванна">ванна</option><option value="кухня">кухня</option></select></div>' +
+      '<div class="row2"><div><label>ХВС, м³ *</label><input class="m-cold" type="text" inputmode="decimal" autocomplete="off" placeholder="27,124"></div>' +
+      '<div><label>ГВС, м³ *</label><input class="m-hot" type="text" inputmode="decimal" autocomplete="off" placeholder="59,010"></div></div>';
+    ["m-cold", "m-hot"].forEach(function(c){
+      var el = d.querySelector("." + c);
+      el.addEventListener("input", function(){ clean(el); fieldErr(el, ""); });
+      el.addEventListener("blur", function(){ checkVal(el); });
+    });
+    d.querySelector(".m-place").addEventListener("change", function(){ fieldErr(this, ""); });
+    d.querySelector(".rm").addEventListener("click", function(){ d.remove(); renumber(); });
+    rowsBox.appendChild(d); renumber();
+  }
+  $("vcb-add").addEventListener("click", addRow);
+  addRow();
+
+  function refresh(){ btn.disabled = !(windowOpen && verified && verified === acc.value); }
+
+  // ---- лицевой счёт: сразу показываем квартиру, только при полном совпадении ----
+  acc.addEventListener("input", function(){
+    acc.value = acc.value.replace(/\D/g, "").slice(0, 12);
+    verified = ""; verifiedPlace = ""; refresh();
+    var v = acc.value, my = ++seq;
+    if (v.length < 12) { flatBox.className = "flat"; flatBox.textContent = ""; return; }
+    if (NOT_SET) { flatBox.className = "flat no"; flatBox.textContent = "Форма не настроена: не указан адрес веб-приложения (URL_API)."; return; }
+    flatBox.className = "flat wait"; flatBox.textContent = "Проверяем лицевой счёт…";
+    fetch(URL_API + "?account=" + encodeURIComponent(v)).then(function(r){return r.json()}).then(function(res){
+      if (my !== seq) return;                                  // ввод уже изменился
+      if (res.found) {
+        verified = v; verifiedPlace = res.place;
+        flatBox.className = "flat ok";
+        flatBox.textContent = (/^\d+$/.test(res.place) ? "Квартира " : "Помещение: ") + res.place;
+      } else { flatBox.className = "flat no"; flatBox.textContent = "Лицевой счёт не найден. Проверьте номер."; }
+      refresh();
+    }).catch(function(e){
+      if (my !== seq) return; console.error("Показания: проверка счёта не удалась", e);
+      flatBox.className = "flat no"; flatBox.textContent = "Не удалось проверить лицевой счёт. Попробуйте ещё раз.";
+    });
+  });
+
+  // ---- окно приёма ----
   if (NOT_SET) console.error("Показания: в URL_API не подставлен адрес веб-приложения (должен оканчиваться на /exec).");
-  fetch(URL_API).then(function(r){return r.json()}).then(function(st){
-    if (st.open) { btn.disabled = false; msg.className = "msg"; }
-    else show("info", st.message || "Приём показаний сейчас закрыт.");
-  }).catch(function(){ btn.disabled = false; });   // нет связи с проверкой — пусть сервер решит при отправке
+  else fetch(URL_API).then(function(r){return r.json()}).then(function(st){
+    if (!st.open) { windowOpen = false; show("info", st.message || "Приём показаний сейчас закрыт."); refresh(); }
+  }).catch(function(e){ console.error("Показания: не удалось получить состояние окна", e); });
 
+  // ---- отправка ----
   $("vcb-form").addEventListener("submit", function(ev){
     ev.preventDefault();
-    var flat = parseInt($("vcb-flat").value, 10), cold = num($("vcb-cold").value), hot = num($("vcb-hot").value);
-    if (!(flat >= 1)) return show("err", "Укажите номер квартиры.");
-    if (!(cold >= 0)) return show("err", "Введите показание ХВС числом.");
-    if (!(hot >= 0))  return show("err", "Введите показание ГВС числом.");
-    if (!confirm("Квартира " + flat + "\nХВС: " + cold + " м³\nГВС: " + hot + " м³\n\nОтправить?")) return;
     if (NOT_SET) return show("err", "Форма не настроена: в коде блока не указан адрес веб-приложения (URL_API).");
-    btn.disabled = true;
+    if (!verified || verified !== acc.value) return show("err", "Введите существующий лицевой счёт — квартира должна определиться.");
+    var rs = rows(), multi = rs.length > 1, out = [], ok = true, seen = {};
+    rs.forEach(function(r){
+      var pl = r.querySelector(".m-place"), c = r.querySelector(".m-cold"), h = r.querySelector(".m-hot");
+      var okc = checkVal(c), okh = checkVal(h);
+      if (!c.value.trim()) { fieldErr(c, "Введите показание"); okc = false; }
+      if (!h.value.trim()) { fieldErr(h, "Введите показание"); okh = false; }
+      var place = multi ? pl.value : "", perr = "";
+      if (multi && !place) perr = "Укажите, где установлен прибор";
+      else if (multi && seen[place]) perr = "Места приборов должны различаться";
+      fieldErr(pl, perr); if (perr) ok = false;
+      seen[place] = 1;
+      if (!okc || !okh) ok = false;
+      out.push({ place: place, cold: c.value, hot: h.value });
+    });
+    if (!ok) return show("err", "Проверьте выделенные поля.");
+    var text = (/^\d+$/.test(verifiedPlace) ? "Квартира " : "Помещение: ") + verifiedPlace + "\n" +
+      out.map(function(o){ return (o.place ? o.place + ": " : "") + "ХВС " + o.cold + ", ГВС " + o.hot; }).join("\n");
+    if (!confirm(text + "\n\nОтправить?")) return;
+    btn.disabled = true; msg.className = "msg";
     fetch(URL_API, { method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"},
-      body: JSON.stringify({ flat: flat, cold: cold, hot: hot, website: $("vcb-site").value })
+      body: JSON.stringify({ account: verified, rows: out, website: $("vcb-site").value })
     }).then(function(r){return r.json()}).then(function(res){
-      if (res.ok) { show("ok", "Спасибо! Показания по квартире " + flat + " приняты."); $("vcb-cold").value = $("vcb-hot").value = ""; }
-      else show("err", res.error || "Не удалось отправить.");
+      if (res.ok) {
+        show("ok", "Спасибо! Показания приняты.");
+        acc.value = ""; verified = ""; flatBox.className = "flat"; rowsBox.innerHTML = ""; addRow();
+      } else show("err", res.error || "Не удалось отправить.");
     }).catch(function(e){ console.error("Показания: запрос не удался", e);
       show("err", "Нет связи с сервером приёма. Попробуйте позже или сообщите в управляющую компанию."); })
-      .then(function(){ btn.disabled = false; });
+      .then(refresh);
   });
 })();
 </script>
