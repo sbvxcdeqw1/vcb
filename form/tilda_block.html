@@ -29,8 +29,8 @@
     #vcb-meter .hp{position:absolute;left:-9999px}
   </style>
   <form id="vcb-form" novalidate>
-    <label for="vcb-acc">Лицевой счёт (12 цифр)</label>
-    <input id="vcb-acc" type="text" inputmode="numeric" maxlength="12" autocomplete="off" placeholder="551010000000">
+    <label for="vcb-acc">Лицевой счёт</label>
+    <input id="vcb-acc" type="text" inputmode="numeric" maxlength="13" autocomplete="off" placeholder="12 цифр">
     <div class="hint">Номер указан в квитанции</div>
     <div class="flat" id="vcb-flat" role="status"></div>
 
@@ -113,7 +113,7 @@
 
   // ---- лицевой счёт: сразу показываем квартиру, только при полном совпадении ----
   acc.addEventListener("input", function(){
-    acc.value = acc.value.replace(/\D/g, "").slice(0, 12);
+    acc.value = acc.value.replace(/\D/g, "").slice(0, 13);
     verified = ""; verifiedPlace = ""; refresh();
     var v = acc.value, my = ++seq;
     if (v.length < 12) { flatBox.className = "flat"; flatBox.textContent = ""; return; }
@@ -124,7 +124,7 @@
       if (res.found) {
         verified = v; verifiedPlace = res.place;
         flatBox.className = "flat ok";
-        flatBox.textContent = (/^\d+$/.test(res.place) ? "Квартира " : "Помещение: ") + res.place;
+        flatBox.textContent = (/^\d+$/.test(res.place) ? "Квартира " : "") + res.place;
       } else { flatBox.className = "flat no"; flatBox.textContent = "Лицевой счёт не найден. Проверьте номер."; }
       refresh();
     }).catch(function(e){
@@ -159,7 +159,7 @@
       out.push({ place: place, cold: c.value, hot: h.value });
     });
     if (!ok) return show("err", "Проверьте выделенные поля.");
-    var text = (/^\d+$/.test(verifiedPlace) ? "Квартира " : "Помещение: ") + verifiedPlace + "\n" +
+    var text = (/^\d+$/.test(verifiedPlace) ? "Квартира " : "") + verifiedPlace + "\n" +
       out.map(function(o){ return (o.place ? o.place + ": " : "") + "ХВС " + o.cold + ", ГВС " + o.hot; }).join("\n");
     if (!confirm(text + "\n\nОтправить?")) return;
     btn.disabled = true; msg.className = "msg";

@@ -45,10 +45,10 @@ function status_() {
 }
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
 
-// Квартира по лицевому счёту — только при полном совпадении 12 цифр. Список счетов наружу не отдаётся.
+// Квартира по лицевому счёту — только при полном совпадении (12–13 цифр). Список счетов наружу не отдаётся.
 function lookup_(account) {
   account = String(account || '').trim();
-  if (!/^\d{12}$/.test(account)) return null;
+  if (!/^\d{12,13}$/.test(account)) return null;
   var d = sheet_('Лицевые счета', ['Лицевой счёт', 'Помещение']).getDataRange().getValues();
   for (var i = 1; i < d.length; i++) if (String(d[i][0]).trim() === account) return String(d[i][1]).trim();
   return null;
