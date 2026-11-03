@@ -18,9 +18,9 @@
     #vcb-meter .meter h3{font-size:15px;margin:12px 0 0;font-weight:600}
     #vcb-meter .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     @media(max-width:420px){#vcb-meter .row2{grid-template-columns:1fr}}
-    #vcb-meter .rm{float:right;background:none;border:0;color:#b42318;cursor:pointer;font-size:13px;width:auto;padding:0;margin:0}
+    #vcb-meter .rm{box-sizing:content-box;float:right;background:none;border:0;color:#b42318;cursor:pointer;font-size:13px;width:auto;padding:0;margin:0}
     #vcb-meter button.add{background:none;border:1px solid #2563eb;color:#2563eb;margin-top:14px}
-    #vcb-meter button{width:100%;margin-top:20px;padding:14px;font-size:15px;font-weight:600;color:#fff;background:#2563eb;border:0;border-radius:6px;cursor:pointer}
+    #vcb-meter button{box-sizing:border-box;width:100%;max-width:100%;margin-top:20px;padding:14px;font-size:15px;font-weight:600;color:#fff;background:#2563eb;border:0;border-radius:6px;cursor:pointer}
     #vcb-meter button:disabled{opacity:.5;cursor:default}
     #vcb-meter .msg{margin-top:14px;padding:12px;border-radius:6px;display:none}
     #vcb-meter .msg.ok{display:block;background:#e6f6ec;color:#067647}
