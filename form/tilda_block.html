@@ -1,4 +1,3 @@
-<!-- Блок «Показания ХВС/ГВС». Вставьте в Tilda: Block library → Other → T123 «HTML». -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600&display=swap&subset=cyrillic" rel="stylesheet">
@@ -64,9 +63,7 @@
 </div>
 <script>
 (function(){
-  // ВСТАВЬТЕ адрес веб-приложения Apps Script (заканчивается на /exec):
   var URL_API = "https://script.google.com/macros/s/ВАШ_ID/exec";
-  // ВСТАВЬТЕ ссылки на страницы вашего сайта: политика обработки ПДн и согласие на обработку ПДн:
   var URL_POLICY = "/policy";
   var URL_CONSENT = "/consent";
 
@@ -78,7 +75,7 @@
 
   function show(cls, text){ msg.className = "msg " + cls; msg.textContent = text; }
   function label(p){ return (/^\d+$/.test(p) ? "Квартира " : "") + p; }
-  function fmt(raw){                                  // -> 00000,000 или null
+  function fmt(raw){
     var s = String(raw).replace(/\s/g, "").replace(".", ",");
     if (!/^\d{1,5}(,\d{1,3})?$/.test(s)) return null;
     var p = s.split(","); return p[0].replace(/^0+(?=\d)/, "") + "," + ((p[1] || "") + "000").slice(0, 3);
@@ -106,7 +103,6 @@
   }
   [area].forEach(function(el){ el.addEventListener("input", function(){ clean(el); fieldErr(el, ""); }); });
 
-  // ---- приборы из базы 1С ----
   function renderKnown(list){
     rowsBox.innerHTML = ""; $("vcb-manual").style.display = "none";
     var d = document.createElement("div"); d.className = "meter known";
@@ -122,7 +118,6 @@
     rowsBox.appendChild(d);
   }
 
-  // ---- ручной ввод (счёта нет в базе приборов): строки ХВС+ГВС, ванна/кухня ----
   function mrows(){ return [].slice.call(rowsBox.querySelectorAll(".meter.man")); }
   function renumber(){
     var rs = mrows(), multi = rs.length > 1;
@@ -160,7 +155,6 @@
   function refresh(){ btn.disabled = !(st.open && verified && verified === acc.value && $("vcb-consent").checked); }
   $("vcb-consent").addEventListener("change", refresh);
 
-  // ---- лицевой счёт ----
   acc.addEventListener("input", function(){
     acc.value = acc.value.replace(/\D/g, "").slice(0, 13);
     verified = ""; meters = null; rowsBox.innerHTML = ""; $("vcb-manual").style.display = "none"; refresh();
@@ -186,7 +180,6 @@
   else fetch(URL_API).then(function(r){return r.json()}).then(applyStatus).then(refresh)
     .catch(function(e){ console.error("Показания: не удалось получить состояние окна", e); });
 
-  // ---- сбор и отправка ----
   function collect(){
     var ok = true, body = { account: verified, consent: $("vcb-consent").checked, website: $("vcb-site").value }, lines = [];
     if (st.needArea) {

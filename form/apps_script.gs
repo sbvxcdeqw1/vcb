@@ -23,6 +23,7 @@ var SETTINGS = [
 var SHOW_HEAD = ['Период', 'Лицевой счёт', 'Помещение', 'Объект учета', 'Прибор учета', 'Заводской номер',
                  'Предыдущее показание', 'Дата пред.', 'Текущее показание', 'Объем', 'Принято', 'Примечание'];
 var VALUE_RE = /^\d{1,5},\d{3}$/;
+var EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
 var MAX_AREA_FAILS = 5;                          // неверных площадей подряд -> блокировка счёта на час
 
 // ---------- общее ----------
@@ -214,7 +215,8 @@ function accept_(d) {
   sh.getRange(first, 7, out.length, 1).setNumberFormat('0.000');
   sh.getRange(first, 9, out.length, 2).setNumberFormat('0.000');
 
-  var email = String(d.email || '').trim(), mailOk = st.email && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
+  // только буквы/цифры/._%+- : строка вида =IMPORTDATA(...) не попадёт в таблицу как формула
+  var email = String(d.email || '').trim().slice(0, 100), mailOk = st.email && EMAIL_RE.test(email);
   var log = sheet_('Журнал', LOG_HEAD, 'A:G');
   log.getRange(log.getLastRow() + 1, 1, out.length, 7).setValues(out.map(function (r) { return [stamp, a.acc, r[4], r[5], f3_(r[8]), 'да', mailOk ? email : '']; }));
 
