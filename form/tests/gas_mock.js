@@ -29,7 +29,7 @@ function load(opts = {}) {
     getSheetByName: n => ss.sheets[n] || null, insertSheet: n => (ss.sheets[n] = makeSheet(ss, n)),
     getSpreadsheetTimeZone: () => 'Europe/Moscow', toast: t => ss.toasts.push(t) };
   const g = {
-    now: opts.now || new Date(2026, 10, 22, 12, 0), mail: [], cache: {},
+    now: opts.now || new Date(2026, 10, 22, 12, 0), mail: [], cache: {}, quota: 100,
   };
   const RealDate = Date;
   const ctx = {
@@ -38,7 +38,7 @@ function load(opts = {}) {
     ContentService: { MimeType: { JSON: 1 }, createTextOutput: t => ({ t, setMimeType() { return this; } }) },
     Utilities: { formatDate: (d, tz, f) => fmtDate(d, f) },
     CacheService: { getScriptCache: () => ({ get: k => g.cache[k] || null, put: (k, v) => { g.cache[k] = v; }, remove: k => { delete g.cache[k]; } }) },
-    MailApp: { getRemainingDailyQuota: () => 100, sendEmail: (to, s, b) => g.mail.push({ to, s, b }) },
+    MailApp: { getRemainingDailyQuota: () => g.quota, sendEmail: (to, s, b, o) => g.mail.push({ to, s, b, o }) },
     console,
     Date: class extends RealDate { constructor(...a) { if (a.length) super(...a); else super(g.now); } },
   };

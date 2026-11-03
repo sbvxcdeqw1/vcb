@@ -113,7 +113,20 @@ const kv1 = (vals) => ({ ...OK, account: KV1, readings: { r1: vals[0], r2: vals[
     const G = fresh();
     G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: 'a@b.ru' }); assert.strictEqual(G.g.mail.length, 0);
     G.setSetting('Подтверждение на почту', 'ДА');
-    G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: 'a@b.ru' }); assert.strictEqual(G.g.mail.length, 1);
+    const r = G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: 'a@b.ru' }); assert.strictEqual(G.g.mail.length, 1);
+    assert.strictEqual(r.mailed, true);
+    const m = G.g.mail[0];
+    assert.strictEqual(m.o.name, 'УК «Водники-1»'); assert.strictEqual(m.o.replyTo, undefined);
+    assert.match(m.s, /кв\. 1$/); assert.match(m.b, /ХВС, ванная · №…5228: 35,000 м³/);
+    G.setSetting('Адрес для ответов', 'uk@example.ru');
+    G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: 'a@b.ru' }); assert.strictEqual(G.g.mail[1].o.replyTo, 'uk@example.ru');
+    G.g.quota = 0;
+    assert.strictEqual(G.post({ ...kv1(['28,000', '29,000', '35,000', '13,000']), email: 'a@b.ru' }).mailed, false);
+    assert.strictEqual(G.get().mailReply, undefined, 'настройки почты не уходят на сайт');
+  });
+  await t('форма: поле e-mail появляется при включённой настройке', () => {
+    const G = fresh(); assert.strictEqual(G.get().email, false);
+    G.setSetting('Подтверждение на почту', 'ДА'); assert.strictEqual(G.get().email, true);
   });
   await t('старый лист «Показания» с другими столбцами переименовывается', () => {
     const H = fresh();
@@ -187,6 +200,18 @@ const kv1 = (vals) => ({ ...OK, account: KV1, readings: { r1: vals[0], r2: vals[
       const box = await p.evaluate(() => [document.getElementById('vcb-acc').getBoundingClientRect(), document.getElementById('vcb-send').getBoundingClientRect(), document.documentElement.scrollWidth]);
       assert.strictEqual(Math.round(box[0].left), Math.round(box[1].left)); assert.strictEqual(Math.round(box[0].right), Math.round(box[1].right));
       assert(box[0].left >= 16, 'отступ от края'); assert.strictEqual(box[2], 360, 'нет горизонтальной прокрутки');
+    });
+    await t('e-mail: поле видно, после приёма — сообщение о письме', async () => {
+      const G = fresh(); G.setSetting('Подтверждение на почту', 'ДА');
+      const p = await open(G);
+      await typeAcc(p, KV1);
+      assert.strictEqual(await p.isVisible('#vcb-email'), true);
+      await p.fill('#vcb-area', '76,5'); await p.fill('#vcb-email', 'a@b.ru'); await p.check('#vcb-consent');
+      const ins = p.locator('.known input');
+      await ins.nth(0).fill('35'); await ins.nth(1).fill('13'); await ins.nth(2).fill('28'); await ins.nth(3).fill('29');
+      await p.click('#vcb-send'); await p.waitForFunction(() => /приняты/.test(document.getElementById('vcb-msg').textContent));
+      assert.match(await p.textContent('#vcb-msg'), /Подтверждение отправлено на a@b\.ru/);
+      assert.strictEqual(G.g.mail.length, 1);
     });
     await t('окно закрыто — кнопка неактивна, текст из настроек', async () => {
       const G = fresh(new Date(2026, 10, 10)), p = await open(G);

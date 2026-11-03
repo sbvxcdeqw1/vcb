@@ -228,7 +228,8 @@
     fetch(URL_API, { method: "POST", headers: {"Content-Type": "text/plain;charset=utf-8"}, body: JSON.stringify(body) })
       .then(function(r){return r.json()}).then(function(res){
         if (res.ok) {
-          show("ok", "Спасибо! Показания приняты." + (body.email ? " Подтверждение отправлено на " + body.email + "." : ""));
+          show("ok", "Спасибо! Показания приняты." + (res.mailed ? " Подтверждение отправлено на " + body.email + "." :
+            body.email ? " Письмо-подтверждение отправить не удалось, но показания сохранены." : ""));
           acc.value = ""; area.value = ""; verified = ""; meters = null; flatBox.className = "box";
           rowsBox.innerHTML = ""; $("vcb-manual").style.display = "none"; $("vcb-consent").checked = false;
         } else if (res.confirm) {

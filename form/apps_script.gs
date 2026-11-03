@@ -16,7 +16,9 @@ var SETTINGS = [
   ['Текст при закрытом окне', 'Показания принимаются с {start} по {end} число каждого месяца.', '{start} и {end} подставляются сами'],
   ['Проверять площадь', 'ДА', 'ДА / НЕТ — жилец вводит общую площадь из квитанции, она сверяется со справочником'],
   ['Макс. расход в месяц, м³', 15, 'больше — форма просит подтвердить, в «Примечании» отметка'],
-  ['Подтверждение на почту', 'НЕТ', 'ДА / НЕТ — поле e-mail в форме и письмо после приёма (лимит Gmail ~100 писем в сутки)']
+  ['Подтверждение на почту', 'НЕТ', 'ДА / НЕТ — поле e-mail в форме и письмо после приёма (лимит Gmail ~100 писем в сутки)'],
+  ['Имя отправителя письма', 'УК «Водники-1»', 'так письмо подписано во «Входящих» жильца'],
+  ['Адрес для ответов', '', 'куда уйдёт ответ жильца на письмо; пусто — на адрес аккаунта Google']
 ];
 var SHOW_HEAD = ['Период', 'Лицевой счёт', 'Помещение', 'Объект учета', 'Прибор учета', 'Заводской номер',
                  'Предыдущее показание', 'Дата пред.', 'Текущее показание', 'Объем', 'Принято', 'Примечание'];
@@ -65,7 +67,8 @@ function settings_() {
   });
   return { start: +map[SETTINGS[0][0]], end: +map[SETTINGS[1][0]], on: yes_(map[SETTINGS[2][0]]),
            closedText: String(map[SETTINGS[3][0]]), area: yes_(map[SETTINGS[4][0]]),
-           maxMonth: num_(map[SETTINGS[5][0]]) || 0, email: yes_(map[SETTINGS[6][0]]) };
+           maxMonth: num_(map[SETTINGS[5][0]]) || 0, email: yes_(map[SETTINGS[6][0]]),
+           mailName: String(map[SETTINGS[7][0]] || '').trim(), mailReply: String(map[SETTINGS[8][0]] || '').trim() };
 }
 function status_() {
   var s = settings_(), now = new Date(), day = +Utilities.formatDate(now, tz_(), 'd');
@@ -74,6 +77,7 @@ function status_() {
   var y = +Utilities.formatDate(now, tz_(), 'yyyy'), mo = +Utilities.formatDate(now, tz_(), 'M');
   if (wrap && day <= s.end) { mo -= 1; if (mo === 0) { mo = 12; y -= 1; } }     // период = месяц начала окна
   return { open: open, period: y + '-' + ('0' + mo).slice(-2), needArea: s.area, email: s.email, maxMonth: s.maxMonth,
+           mailName: s.mailName, mailReply: s.mailReply,
            message: open ? '' : s.closedText.replace('{start}', s.start).replace('{end}', s.end) };
 }
 
@@ -122,7 +126,7 @@ function doGet(e) {
       st.meters = meters_(a.obj).map(function (m) { return { id: m.id, label: m.label, kind: m.kind }; });  // без показаний
     }
   }
-  delete st.maxMonth;
+  delete st.maxMonth; delete st.mailName; delete st.mailReply;
   return json_(st);
 }
 
@@ -214,15 +218,25 @@ function accept_(d) {
   var log = sheet_('Журнал', LOG_HEAD, 'A:G');
   log.getRange(log.getLastRow() + 1, 1, out.length, 7).setValues(out.map(function (r) { return [stamp, a.acc, r[4], r[5], f3_(r[8]), 'да', mailOk ? email : '']; }));
 
+  var mailed = false;
   if (mailOk) {
     try {
-      if (MailApp.getRemainingDailyQuota() > 0)
-        MailApp.sendEmail(email, 'Показания приняты',
-          'Показания по лицевому счёту ' + a.acc + ' приняты ' + stamp + ':\n\n' +
-          list.map(function (m) { return m.label + ': ' + f3_(m.num); }).join('\n') + '\n\nЭто автоматическое письмо, отвечать на него не нужно.');
+      if (MailApp.getRemainingDailyQuota() > 0) {
+        var opts = {};
+        if (st.mailName) opts.name = st.mailName;
+        if (st.mailReply) opts.replyTo = st.mailReply;
+        MailApp.sendEmail(email, 'Показания приняты — ' + (/^\d+$/.test(a.place) ? 'кв. ' : '') + a.place,
+          'Здравствуйте!\n\nПоказания по лицевому счёту ' + a.acc + ' (' + (/^\d+$/.test(a.place) ? 'квартира ' : '') + a.place +
+          ') приняты ' + stamp + ', расчётный период ' + st.period + ':\n\n' +
+          list.map(function (m) { return m.label + ': ' + f3_(m.num) + ' м³'; }).join('\n') +
+          '\n\nЕсли вы не передавали эти показания или заметили ошибку, сообщите в управляющую компанию' +
+          (st.mailReply ? ' — ответьте на это письмо.' : '.') +
+          '\nПовторная отправка формы в этом периоде заменяет показания.\n\n' + (st.mailName || ''), opts);
+        mailed = true;
+      } else console.error('почта: исчерпан дневной лимит');
     } catch (err) { console.error('почта', err); }
   }
-  return { ok: true };
+  return { ok: true, mailed: mailed };
 }
 
 // ---------- меню в таблице ----------
