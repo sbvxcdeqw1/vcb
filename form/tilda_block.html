@@ -55,7 +55,7 @@
     </div>
 
     <label class="consent"><input type="checkbox" id="vcb-consent">
-      <span>Согласен(на) на обработку персональных данных в соответствии с <a id="vcb-policy" href="#" target="_blank" rel="noopener">политикой обработки персональных данных</a></span></label>
+      <span>Даю <a id="vcb-consent-link" href="#" target="_blank" rel="noopener">согласие на обработку персональных данных</a> и подтверждаю, что ознакомлен(а) с <a id="vcb-policy" href="#" target="_blank" rel="noopener">политикой обработки персональных данных</a></span></label>
 
     <input class="hp" id="vcb-site" type="text" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button id="vcb-send" type="submit" disabled>Отправить показания</button>
@@ -66,14 +66,15 @@
 (function(){
   // ВСТАВЬТЕ адрес веб-приложения Apps Script (заканчивается на /exec):
   var URL_API = "https://script.google.com/macros/s/ВАШ_ID/exec";
-  // ВСТАВЬТЕ ссылку на страницу политики обработки персональных данных на вашем сайте:
+  // ВСТАВЬТЕ ссылки на страницы вашего сайта: политика обработки ПДн и согласие на обработку ПДн:
   var URL_POLICY = "/policy";
+  var URL_CONSENT = "/consent";
 
   var NOT_SET = URL_API.indexOf("ВАШ_ID") !== -1 || URL_API.indexOf("/exec") === -1;
   var $ = function(id){return document.getElementById(id)};
   var msg = $("vcb-msg"), btn = $("vcb-send"), acc = $("vcb-acc"), flatBox = $("vcb-flat"), rowsBox = $("vcb-rows"), area = $("vcb-area");
   var st = { open: true, needArea: false, email: false }, verified = "", place = "", meters = null, seq = 0;
-  $("vcb-policy").href = URL_POLICY;
+  $("vcb-policy").href = URL_POLICY; $("vcb-consent-link").href = URL_CONSENT;
 
   function show(cls, text){ msg.className = "msg " + cls; msg.textContent = text; }
   function label(p){ return (/^\d+$/.test(p) ? "Квартира " : "") + p; }
