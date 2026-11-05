@@ -232,7 +232,19 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
             setattr(debtor, f, getattr(auto, f))
     if not debtor.fio:
         debtor.fio = next((a.owner for _, a, _ in loaded if a.owner), "")
+    fio_note = ""
+    if not debtor.fio:  # нет ни в реестре должников, ни в шапке выгрузки - плательщик из назначения платежей
+        from .autofill import _fio_from_register
+
+        for pkg, a, _ in loaded:
+            if pkg.payments:
+                debtor.fio = _fio_from_register(str(pkg.payments), a.number)
+                if debtor.fio:
+                    fio_note = f"ФИО должника ({debtor.fio}) взято из назначения платежей реестра оплат — проверьте"
+                    break
     case = Case(primary, debtor, profile["claimant"], profile["representative"], date.max, date.min, as_of)
+    if fio_note:
+        case.notes.append(fio_note)
     several = len(packages) > 1
     for pkg, acc, removed in loaded:
         _process_package(case, pkg, acc, removed, row, cfg, as_of, period,
@@ -397,18 +409,39 @@ def _apply_register(note, acc, cfg: dict, payments_path, overrides_path, as_of: 
                       ("Только оплаты от плательщика, на самые ранние", mk(only_res), False)]
 
 
+RU_MONTHS_FILE = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь",
+                  "ноябрь", "декабрь"]
+
+
+def file_suffix(case: Case) -> str:
+    """Часть имени каждого файла: месяц и год расчёта, улица, дом, квартира и фамилия должника
+    («ноябрь_2026_Адмирала_Ушакова_д55-1_кв98_Иванов»)."""
+    d = case.debtor
+    street = re.sub(r"^(ул|улица)\.?\s*", "", d.street.strip(), flags=re.I)
+    surname = (d.fio or case.account.owner or "").split()
+    parts = [f"{RU_MONTHS_FILE[case.as_of.month - 1]} {case.as_of.year}", street,
+             f"д{d.house}" if d.house else "", f"кв{d.flat}" if d.flat else "", surname[0] if surname else ""]
+    text = "_".join(p for p in parts if p)
+    text = re.sub(r'[\\/:*?"<>|]+', "-", text)  # недопустимые в имени файла символы (дом 55/1 -> 55-1)
+    return re.sub(r"[\s_]+", "_", text).strip("_.")
+
+
 def write_case(case: Case, out_dir: Path, claim: bool = True, allocation_report: bool = False) -> list[Path]:
     """По каждому пакету (ЖКУ, капремонт): шахматка с учётом реестра оплат, карточка расчёта и расчёт пени;
     по желанию - общее заявление (иск или судебный приказ) и отчёты о разноске оплат."""
     out_dir.mkdir(parents=True, exist_ok=True)
     files = []
 
+    tail = file_suffix(case)
+
     def emit(name, fn):
+        stem, ext = name.rsplit(".", 1)
+        name = f"{stem}_{tail}.{ext}" if tail else name
         fn(out_dir / name)
         files.append(out_dir / name)
 
     for cat, res in case.results.items():
-        emit(f"Шахматка_с_учетом_оплат_{NAMES[cat]}.xlsx", lambda p, res=res: write_checkerboard(p, case, res))
+        emit(f"Расчет_начислений_и_оплат_{NAMES[cat]}.xlsx", lambda p, res=res: write_checkerboard(p, case, res))
         emit(f"Карточка_расчета_{NAMES[cat]}.xlsx", lambda p, res=res: write_calc_card(p, case, res))
         emit(f"Расчет_пени_{NAMES[cat]}.xlsx", lambda p, res=res: write_penalty_card(p, case, res))
     if claim:

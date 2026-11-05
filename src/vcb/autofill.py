@@ -7,7 +7,7 @@ from pathlib import Path
 from .debtors import debtor_from_account
 from .names import genitive_fio
 
-FIO_RE = r"[А-ЯЁ][а-яё\-]+(?: [А-ЯЁ][а-яё\-]+){1,2}"
+FIO_RE = r"[А-ЯЁ][а-яё\-]+(?: [А-ЯЁ][а-яё\-]+){1,2}|[А-ЯЁ][а-яё\-]+ [А-ЯЁ]\.\s?[А-ЯЁ]\."  # ФИО или «Фамилия И.О.»
 
 
 def _fio_from_register(path: str, number: str) -> str:
@@ -20,7 +20,7 @@ def _fio_from_register(path: str, number: str) -> str:
         return ""
     digits = re.sub(r"\D", "", number)
     for p in pays:
-        m = re.match(rf"\s*(?:\d+|[А-ЯA-Z]\d+)[,;\s]+({FIO_RE})\b", p.info)
+        m = re.match(rf"\s*(?:\d+|[А-ЯA-Z]\d+)[,;\s]+({FIO_RE})", p.info)
         if m and (not digits or digits.lstrip("0") in re.sub(r"\D", "", p.info.split(m.group(1))[0]).lstrip("0")):
             return m.group(1)
     return ""

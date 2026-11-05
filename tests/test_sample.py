@@ -237,10 +237,10 @@ def test_typography_and_print_setup(tmp_path):
     prof = {"claimant": Party(), "representative": Party(), "legal": {}}
     case = build_case(SAMPLE, None, prof, load_config(), date(2026, 4, 13), None)
     write_case(case, tmp_path)
-    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Шахматка_с_учетом_оплат_ЖКУ.xlsx", False)):
-        ws = load_workbook(tmp_path / name).worksheets[0]
+    for name, landscape in (("Карточка_расчета_ЖКУ.xlsx", False), ("Расчет_пени_ЖКУ.xlsx", True), ("Расчет_начислений_и_оплат_ЖКУ.xlsx", False)):
+        ws = load_workbook(next(tmp_path.glob(name.replace(".xlsx", "_*.xlsx")))).worksheets[0]
         assert ws.page_setup.paperSize == 9 and (ws.page_setup.orientation == "landscape") == landscape
-        assert ws.print_title_rows or name.startswith("Шахматка")  # шахматка: блоки со своими шапками
+        assert ws.print_title_rows or name.startswith("Расчет_начислений")  # шахматка: блоки со своими шапками
     import docx
 
     doc = docx.Document(next(tmp_path.glob("*.docx")))
@@ -316,11 +316,18 @@ def test_chess_plus_register_pipeline(tmp_path):
     grid = res.grid_entries
     assert sum(e.amount for e in grid if e.kind == "charge") - sum(e.amount for e in grid if e.kind == "payment") == res.debt
     files = write_case(full, tmp_path, claim=False)
-    assert sorted(f.name for f in files) == ["Карточка_расчета_ЖКУ.xlsx", "Расчет_пени_ЖКУ.xlsx",
-                                              "Шахматка_с_учетом_оплат_ЖКУ.xlsx"]
-    chess = load_workbook(tmp_path / "Шахматка_с_учетом_оплат_ЖКУ.xlsx")
+    # в имени каждого файла: документ, месяц и год расчёта, улица, дом, квартира, фамилия должника
+    import re
+
+    from vcb.pipeline import file_suffix
+
+    tail = f"_{file_suffix(full)}.xlsx"
+    assert re.fullmatch(r"_[а-я]+_20\d\d_[^_]+(_[^_]+)*_д[^_]+_кв[^_]+_[А-ЯЁ][а-яё\-]+\.xlsx", tail), tail
+    assert sorted(f.name for f in files) == sorted([f"Карточка_расчета_ЖКУ{tail}", f"Расчет_пени_ЖКУ{tail}",
+                                                     f"Расчет_начислений_и_оплат_ЖКУ{tail}"])
+    chess = load_workbook(tmp_path / f"Расчет_начислений_и_оплат_ЖКУ{tail}")
     assert chess.sheetnames == ["Шахматка"]  # всё на одном листе; месяцы переносятся блоками вниз
-    ws = load_workbook(tmp_path / "Карточка_расчета_ЖКУ.xlsx").worksheets[0]
+    ws = load_workbook(tmp_path / f"Карточка_расчета_ЖКУ{tail}").worksheets[0]
     heads = [c.value for row in ws.iter_rows() for c in row if c.value in ("Начислено, руб.", "Задолженность, руб.")]
     assert heads == ["Начислено, руб."]  # столбца нарастающей «Задолженность» в карточке нет
     text = "\n".join(str(c.value) for row in ws.iter_rows() for c in row if c.value)
@@ -382,9 +389,9 @@ def test_two_packages_combined_claim(tmp_path):
     assert {s.divisor for it in both.results[CAPREPAIR].penalty_items for s in it.segments} == {300}
     assert {s.divisor for it in both.results[SERVICES].penalty_items for s in it.segments} == {300, 130}
     files = write_case(both, tmp_path / "out")
-    names = sorted(f.name for f in files)
+    names = sorted(f.name.split("_апрель")[0] + ".xlsx" if f.suffix == ".xlsx" else f.name for f in files)
     for cat in ("ЖКУ", "капремонт"):
-        assert f"Шахматка_с_учетом_оплат_{cat}.xlsx" in names and f"Карточка_расчета_{cat}.xlsx" in names
+        assert f"Расчет_начислений_и_оплат_{cat}.xlsx" in names and f"Карточка_расчета_{cat}.xlsx" in names
         assert f"Расчет_пени_{cat}.xlsx" in names
     assert sum(n.endswith(".docx") for n in names) == 1  # один общий иск/приказ
     text = "\n".join(p.text for p in docx.Document(next((tmp_path / "out").glob("*.docx"))).paragraphs)
@@ -618,3 +625,17 @@ def test_claim_attachments_all_have_copies(tmp_path):
     assert att and all(t.endswith(" - 1 экз.") for t in att)
     assert any("Расчёт начислений и оплат по услугам" in t for t in att)
     assert not any("Шахматка" in t for t in att)
+
+
+def test_file_names_have_month_address_and_surname(tmp_path):
+    from vcb.config import load_config
+    from vcb.models import Debtor, Party
+    from vcb.pipeline import build_case, file_suffix, write_case
+
+    g, _ = two_packages(tmp_path)
+    prof = {"claimant": Party(short_name="ООО «Тест»"), "representative": Party(), "legal": {}}
+    case = build_case(g, {"fio": "Иванов Иван Иванович", "house": "55/1"}, prof, load_config(), date(2026, 11, 5), None)
+    assert file_suffix(case) == "ноябрь_2026_Тестовая_д55-1_кв2_Иванов"
+    names = sorted(f.name for f in write_case(case, tmp_path / "out"))
+    assert all(n.split(".")[0].endswith("_ноябрь_2026_Тестовая_д55-1_кв2_Иванов") for n in names), names
+    assert any(n.startswith(("Заявление_на_судебный_приказ_", "Исковое_заявление_")) for n in names)
