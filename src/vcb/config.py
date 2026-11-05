@@ -63,4 +63,6 @@ def rules_from(cfg: dict, category: str = "services") -> tuple[PenaltyRules, Rat
             if line.strip() and not line.lower().startswith("дата"):
                 d, r = line.replace(",", ".").split(";")[:2]
                 rates.history.append((date.fromisoformat(d.strip()), Decimal(r.strip())))
+    if p.get("fixed_rate") not in (None, ""):
+        rates.fixed = D(str(p["fixed_rate"]))
     return rules, rates

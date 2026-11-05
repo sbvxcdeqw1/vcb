@@ -56,6 +56,12 @@ class Case:
     legal_contract: str = ""  # «№ 25-25/юр от 27.06.2025г.»
     legal_executor: str = ""  # «ООО «СВТ»»
     notes: list[str] = field(default_factory=list)  # предупреждения для сводки
+    flat: Debtor | None = None  # квартира, по которой задолженность (адрес из шапки выгрузки)
+
+    @property
+    def premises(self) -> Debtor:
+        """Адрес квартиры с долгом: из шапки выгрузки, а если его там нет - из данных должника."""
+        return self.flat if self.flat and self.flat.street and self.flat.house else self.debtor
 
     @property
     def categories(self) -> list[str]:

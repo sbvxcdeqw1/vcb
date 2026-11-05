@@ -629,7 +629,7 @@ def test_claim_attachments_all_have_copies(tmp_path):
 
 def test_file_names_have_month_address_and_surname(tmp_path):
     from vcb.config import load_config
-    from vcb.models import Debtor, Party
+    from vcb.models import Party
     from vcb.pipeline import build_case, file_suffix, write_case
 
     g, _ = two_packages(tmp_path)
@@ -661,3 +661,31 @@ def test_one_rate_for_whole_calculation():
     assert [r.base for r in rows][:2] == [Decimal("3977.43"), Decimal("3977.43")]  # без раздвоения по ставкам
     items = calc_penalty([ln], as_of, PenaltyRules(rate_on="payment"), rates)
     assert rates.at(date(2023, 7, 20)) < Decimal("9.5") and items[0].segments[0].rate == rates.at(date(2023, 7, 20))
+
+
+def test_flat_address_used_for_court_claim_and_files(tmp_path):
+    """Адрес должника, введённый вручную, не подменяет адрес квартиры с долгом в заявлении и в выборе суда."""
+    import docx
+
+    from vcb.config import load_config
+    from vcb.models import Party
+    from vcb.pipeline import build_case, write_case
+
+    g, _ = two_packages(tmp_path)
+    prof = {"claimant": Party(short_name="ООО «Тест»"), "representative": Party(), "legal": {}}
+    row = {"fio": "Иванов Иван Иванович", "street": "Мира", "house": "7", "flat": "11"}
+    case = build_case(g, row, prof, load_config(), date(2026, 11, 5), None)
+    assert (case.premises.street, case.premises.house, case.premises.flat) == ("Тестовая", "1", "2")
+    doc = next(f for f in write_case(case, tmp_path / "o") if f.suffix == ".docx")
+    text = " ".join(p.text for p in docx.Document(doc).paragraphs).replace("\xa0", " ")
+    assert "жилого помещения, расположенного по адресу: г. Пермь, ул. Тестовая, д. 1, кв. 2" in text
+    assert "Иванов Иван Иванович." in text and ".." not in text
+
+
+def test_fixed_rate_from_config():
+    from vcb.config import load_config, rules_from
+
+    cfg = load_config()
+    cfg["penalty"]["fixed_rate"] = "8"
+    _, rates = rules_from(cfg)
+    assert rates.at(date(2021, 1, 1)) == rates.at(date(2026, 11, 5)) == Decimal("8")

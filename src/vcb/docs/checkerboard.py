@@ -58,7 +58,7 @@ def write_checkerboard(path, case: Case, res=None):
         (f"за период {MONTHS[months[0][1] - 1].lower()} {months[0][0]} г. – {MONTHS[months[-1][1] - 1].lower()} "
          f"{months[-1][0]} г.", "center"), ("", "gap"),
         (f"Лицевой счёт: {account.number}", "left"),
-        (f"Адрес: {case.debtor.address or account.address}", "left")]
+        (f"Адрес: {case.premises.address or account.address}", "left")]
     if case.debtor.fio or account.owner:
         lines.append((f"Собственник: {case.debtor.fio or account.owner}", "left"))
     lines.append(("", "gap"))

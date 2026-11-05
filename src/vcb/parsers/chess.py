@@ -4,6 +4,7 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import date, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from ..models import CHARGE, OPENING, PAYMENT, PENALTY, Account, Entry
@@ -94,15 +95,16 @@ def parse_chess(path: str | Path, rows: list[list] | None = None) -> Account:
         closing_col = next((j for j, (c, _) in cols.items() if c == "closing"), None)
         if closing_col is not None and r[closing_col] not in (None, ""):
             if abs(D(r[closing_col]) - (opening + charged - paid)) > D("0.01"):
-                acc.warnings.append(f"{name}: конечный остаток {r[closing_col]} не сходится с расчётным "
-                                    f"{opening + charged - paid}")
+                from ..money import fmt
+
+                acc.warnings.append(f"{name}: в шахматке 1С конечный остаток {fmt(D(r[closing_col]))} не равен "
+                                    f"«начальный остаток + начислено − оплачено» ({fmt(opening + charged - paid)}) — "
+                                    f"проверьте выгрузку")
     return acc
 
 
-def list_services(path: str | Path) -> list[tuple[str, "Decimal"]]:
+def list_services(path: str | Path) -> list[tuple[str, Decimal]]:
     """Услуги шахматки в порядке файла и сумма их начислений - чтобы оператор мог снять галочки до расчёта."""
-    from decimal import Decimal
-
     rows = _rows(Path(path))
     if not is_chess(rows):
         return []

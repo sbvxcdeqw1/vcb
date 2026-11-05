@@ -158,13 +158,18 @@ class CourtRegistry:
         # 2. описание границ текстом: населённый пункт (+ улица) должны встречаться в тексте
         if not city:
             return None
+        structured = any(_norm(t.get("city", "")) == city and t.get("streets") for c in mags for t in c.territory)
         stem = city[:-1] if len(city) > 5 else city
         rx_city = re.compile(rf"(?<![а-яё]){re.escape(stem)}[а-яё]{{0,2}}(?![а-яё])", re.I)  # «Пермь», не «Пермский»
         cands = [c for c in mags if rx_city.search(c.territory_text.lower().replace("ё", "е"))]
         if street and len(cands) > 1:
             rx_st = re.compile(rf"(?<![а-яё]){re.escape(street.split()[0][:max(len(street.split()[0]) - 2, 4)])}", re.I)
             narrowed = [c for c in cands if rx_st.search(c.territory_text.lower().replace("ё", "е"))]
-            cands = narrowed or cands
+            cands = narrowed or ([] if structured else cands)  # улицы нет ни в одном описании - не гадаем
+        if not cands and structured:
+            self.notes.append(f"адрес «{debtor.street_full}, д. {debtor.house}» не найден в границах участков "
+                              f"мировых судей г. {debtor.city} — укажите участок вручную")
+            return None
         if len(cands) == 1:
             self.notes.append(f"участок определён по тексту описания границ — проверьте: {cands[0].name}")
             return cands[0]

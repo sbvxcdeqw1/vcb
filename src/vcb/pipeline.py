@@ -18,8 +18,8 @@ from .docs.cards import write_calc_card, write_penalty_card
 from .docs.checkerboard import write_checkerboard
 from .docs.claim import write_claim
 from .docs.context import Case, CategoryResult
-from .models import CAPREPAIR, CHARGE, OPENING, PAYMENT, PENALTY, SERVICES, Debtor, Entry, Party
-from .money import D, fmt as fmt_money, q
+from .models import CAPREPAIR, CHARGE, OPENING, PAYMENT, PENALTY, SERVICES, Debtor, Entry
+from .money import D, fmt as fmt_money
 from .parsers.onec import parse_any
 
 NAMES = {SERVICES: "ЖКУ", CAPREPAIR: "капремонт"}
@@ -245,6 +245,10 @@ def build_case(card_path, row: dict | None, profile: dict, cfg: dict, as_of: dat
     case = Case(primary, debtor, profile["claimant"], profile["representative"], date.max, date.min, as_of)
     if fio_note:
         case.notes.append(fio_note)
+    elif not debtor.fio:
+        case.notes.append("ФИО должника не найдено ни в данных должника, ни в выгрузке, ни в реестре оплат — "
+                          "в документах останется пустое поле, в имени файлов нет фамилии")
+    case.flat = debtor_from_account(primary, default_city=debtor.city or (registry.default_city if registry else ""))
     several = len(packages) > 1
     for pkg, acc, removed in loaded:
         _process_package(case, pkg, acc, removed, row, cfg, as_of, period,
@@ -271,6 +275,11 @@ def _process_package(case: Case, pkg: Package, acc, removed, row, cfg, as_of, pe
     first = min(e.date for e in charges)
     p_from = period[0] or _to_date(row.get("period_from")) or date(first.year, first.month, 1)
     p_to = period[1] or _to_date(row.get("period_to")) or max(e.date for e in charges)
+    if p_to > as_of:  # начисления после даты расчёта ещё не подлежат оплате - их нет ни в расчёте, ни в документах
+        later = sum((e.amount for e in charges if as_of < e.date <= p_to), Decimal(0))
+        if later:
+            note(f"начисления после даты расчёта {as_of:%d.%m.%Y} ({fmt_money(later)} руб.) в расчёт не входят")
+        p_to = as_of
     if p_from > p_to:
         raise ValueError(f"расчётный период задан неверно: {p_from:%d.%m.%Y} – {p_to:%d.%m.%Y}")
     rules, rates = rules_from(cfg, cat)
@@ -345,14 +354,15 @@ def _choose_court(case: Case, cfg: dict, registry: CourtRegistry | None):
             level = "magistrate" if price <= D(c["magistrate_claim_limit"]) else "district"
     case.court_level = level
     case.fee = state_fee(price, cfg, level=level, order=(kind == "order"))
-    court = registry.find(case.debtor, level, str(case.debtor.extra.get("court", ""))) if registry else None
+    court = registry.find(case.premises, level, str(case.debtor.extra.get("court", ""))) if registry else None
     if registry:
         case.notes += registry.notes
     if court:
         case.court_name, case.court_address = court.name, court.address
     else:
         what = "мирового судьи" if level == "magistrate" else "районного суда"
-        case.notes.append(f"не определён суд ({what}) по адресу {case.debtor.address}: нет в справочнике судов")
+        if not (registry and registry.notes):  # о причине (кандидаты, адрес не найден) уже сказано выше
+            case.notes.append(f"не определён суд ({what}) по адресу {case.premises.address}: нет в справочнике судов")
 
 
 def _apply_register(note, acc, cfg: dict, payments_path, overrides_path, as_of: date):
@@ -417,9 +427,7 @@ def file_suffix(case: Case) -> str:
     """Часть имени каждого файла: месяц и год расчёта, улица, дом, квартира и фамилия должника
     («ноябрь_2026_Адмирала_Ушакова_д55-1_кв98_Иванов»). Адрес - квартиры, по которой долг (шапка выгрузки),
     а не адрес должника; если в шапке адреса нет - из данных должника."""
-    d = debtor_from_account(case.account)
-    if not (d.street and d.house):
-        d = case.debtor
+    d = case.premises
     street = re.sub(r"^(ул|улица)\.?\s*", "", d.street.strip(), flags=re.I)
     surname = (case.debtor.fio or case.account.owner or "").split()
     parts = [f"{RU_MONTHS_FILE[case.as_of.month - 1]} {case.as_of.year}", street,

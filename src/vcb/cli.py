@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 from . import __version__
-from .config import DATA, load_config
+from .config import load_config
 from .court.registry import CourtRegistry
 from .debtors import read_registry
 from .money import fmt
@@ -63,6 +63,8 @@ def run(argv):
     ap.add_argument("--config", help="свои настройки расчёта (yaml)")
     ap.add_argument("--as-of", help="дата расчёта ГГГГ-ММ-ДД (по умолчанию сегодня)")
     ap.add_argument("--period-from"), ap.add_argument("--period-to")
+    ap.add_argument("--rate", help="единая ставка пени, %% годовых, для всего расчёта (например 9.5); "
+                                   "по умолчанию - ключевая ставка на дату расчёта с потолком 9,5%%")
     ap.add_argument("--moratoria", help="мораторные периоды без пени через запятую: covid2020 (01.04.2020-31.12.2020), "
                                         "pp497 (01.04.2022-01.10.2022), none - без мораториев; по умолчанию оба")
     ap.add_argument("--payments", help="реестр оплат (файл или папка): оплаты разносятся по назначению платежа; общий реестр фильтруется по лицевому счёту")
@@ -75,6 +77,8 @@ def run(argv):
     a = ap.parse_args(argv)
 
     cfg = load_config(a.config)
+    if a.rate:
+        cfg["penalty"]["fixed_rate"] = a.rate.replace(",", ".").replace("%", "").strip()
     if a.moratoria is not None:
         cfg["penalty"]["moratoria_enabled"] = [x.strip() for x in a.moratoria.split(",") if x.strip() and x.strip() != "none"]
     if a.doc:
@@ -112,7 +116,7 @@ def run(argv):
             else:
                 case = build_case(kr, row, profile, cfg, as_of, registry, period, a.cap_payments,
                                   cap_ov or a.payment_overrides, a.cap_exclude_services, CAPREPAIR)
-            folder = out / safe(f"{case.account.number}_{case.debtor.fio}")
+            folder = out / safe("_".join(x for x in (case.account.number, case.debtor.fio) if x))
             write_case(case, folder, claim=not a.no_claim, allocation_report=a.allocation_report)
             kinds = " + ".join(NAMES[c] for c in case.results)
             summary.append([title, case.debtor.fio, case.account.number, kinds, fmt(case.debt), fmt(case.penalty),

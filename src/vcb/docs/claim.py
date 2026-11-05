@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 import yaml
 from docx import Document
@@ -12,7 +11,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Pt
 
 from ..config import ROOT
-from ..models import CAPREPAIR, CATEGORY_TITLES, SERVICES
+from ..models import CAPREPAIR, SERVICES
 from ..money import fmt, in_words
 from .context import Case
 
@@ -110,6 +109,7 @@ def _doc() -> Document:
 def _p(d, text="", *, bold=False, align=None, indent=True, after=0, before=0, keep_next=False, single=False,
        hanging=None, container=None):
     """Абзац основного текста: по ширине, абзацный отступ 1,25 см, интервал 1,15."""
+    text = re.sub(r"(?<!\.)\.\.(?!\.)", ".", text)  # «Иванов И.И..» - инициалы в конце фразы
     p = (container or d).add_paragraph()
     pf = p.paragraph_format
     if hanging is not None:
@@ -201,10 +201,11 @@ def write_claim(path, case: Case):
        keep_next=True)
     # --- обстоятельства
     full = c.name or cname
-    house = f"{dbt.house}" if dbt.house else BLANK
+    flat = case.premises
+    house = f"{flat.house}" if flat.house else BLANK
     _p(d, f"{full} осуществляет управление многоквартирным домом № {house}, расположенным по адресу: "
-          f"{_val(dbt.city and 'г. ' + dbt.city)}{', ' + dbt.street_full if dbt.street else ''}.")
-    _p(d, f"Собственником жилого помещения, расположенного по адресу: {_val(dbt.address)} является: "
+          f"{_val(flat.city and 'г. ' + flat.city)}{', ' + flat.street_full if flat.street else ''}.")
+    _p(d, f"Собственником жилого помещения, расположенного по адресу: {_val(flat.address)} является: "
           f"{_val(dbt.fio)}.")
     for t in STATIC["housing_law"]:
         _p(d, t)
@@ -221,8 +222,7 @@ def write_claim(path, case: Case):
     for t in ((law[0], law[1]) if SERVICES in cats else ()) + ((law[2],) if CAPREPAIR in cats else ()) + (law[3],):
         _p(d, t)
     key = case.results[cats[0]].rate
-    _p(d, f"Размер ключевой ставки Банка России для расчета пени на момент подачи заявления составляет - "
-          f"{fmt(key)}% годовых;")
+    _p(d, f"Ставка для расчета пени (единая для всего расчета, на дату расчета) составляет {fmt(key)}% годовых;")
     for cat in cats:
         res = case.results[cat]
         _p(d, f"Размер пени за несвоевременную оплату {SUBJECT[cat].replace('по оплате ', '')} за период "

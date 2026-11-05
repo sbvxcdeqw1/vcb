@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from ..money import D, q
+from ..money import q
 from .ledger import ChargeLine
 
 
@@ -30,8 +30,11 @@ class RateTable:
     cap: Decimal | None = None  # потолок ставки для пени за ЖКУ (в образцах заказчика - 9,5%)
     cap_from: date | None = None
     cap_to: date | None = None
+    fixed: Decimal | None = None  # единая ставка, заданная оператором, - на любую дату
 
     def at(self, d: date) -> Decimal:
+        if self.fixed is not None:
+            return self.fixed
         rate = None
         for since, r in sorted(self.history):
             if since <= d:

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from decimal import Decimal
 
 from openpyxl import Workbook
 
@@ -10,7 +9,7 @@ from ..money import fmt
 from ..parsers.payments import KIND_TITLES
 from .context import Case
 from .. import __version__
-from .xlsx_util import (BORDER, CENTER, HEADER_FILL, LEFT, MONEY, TOTAL_FILL, header_row, put, setup_print, signature_block,
+from .xlsx_util import (LEFT, MONEY, header_row, put, setup_print, signature_block,
                         title_block, widths)
 
 

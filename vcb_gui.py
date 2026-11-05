@@ -77,6 +77,19 @@ def parse_date(text: str) -> str | None:
     raise ValueError(f"не понимаю дату «{text}», нужен формат дд.мм.гггг")
 
 
+def _rate_text(text: str) -> str:
+    """«9,5» / «9.5 %» -> «9.5»; пусто - ставка по таблице. Иначе ValueError с понятным текстом."""
+    t = text.replace(",", ".").replace("%", "").strip()
+    if not t:
+        return ""
+    try:
+        if not 0 < float(t) < 100:
+            raise ValueError
+    except ValueError:
+        raise ValueError("«Единая ставка для пени» — число процентов годовых, например 9,5") from None
+    return t
+
+
 def build_argv(v: dict) -> list[str]:
     """Значения формы -> аргументы командной строки vcb (вынесено отдельно, чтобы тестировать без окна)."""
     if not v.get("source") and not v.get("cap_source"):
@@ -99,6 +112,8 @@ def build_argv(v: dict) -> list[str]:
         d = parse_date(v.get(key, ""))
         if d:
             argv += [flag, d]
+    if v.get("rate"):
+        argv += ["--rate", v["rate"]]
     if v.get("moratoria"):
         argv += ["--moratoria", v["moratoria"]]
     if v.get("doc") in ("order", "claim"):
@@ -254,6 +269,9 @@ HELP = {
     "par.period_to": "Конец расчётного периода. Пусто — до последнего начисления выгрузки.",
     "par.moratoria": "Периоды, за которые пени не начисляются. Если просрочка пересекается с периодом, из неё "
                      "убираются только дни внутри периода; до и после пени идут как обычно.",
+    "par.rate": "Единая ставка для всего расчёта пени, % годовых: одна на все месяцы и периоды. Пусто — ключевая "
+                "ставка Банка России на дату расчёта, но не выше 9,5% (ограничение Правительства РФ). Эта же ставка "
+                "указывается в заявлении.",
     "par.doc": "Судебный приказ или исковое заявление. «Автоматически» — приказ при сумме до 500 000 ₽, иначе иск.",
     "par.region": "Регион, по справочнику судов которого определяется подсудность.",
 }
@@ -741,6 +759,8 @@ class App:
         self.field(body, "par", "as_of", "Рассчитать на дату", "дд.мм.гггг", 0, 0).insert(0, today)
         self.field(body, "par", "period_from", "Расчётный период с", "пусто — с начала выгрузки", 0, 1)
         self.field(body, "par", "period_to", "Расчётный период по", "пусто — до конца выгрузки", 0, 2)
+        self.field(body, "par", "rate", "Единая ставка для пени, % годовых", "пусто — ключевая ставка, не выше 9,5",
+                   1, 2).insert(0, "9,5")
         self.regions = {}
         for p in sorted((self.data_dir / "courts").glob("*.yaml")):
             name = p.stem
@@ -1127,6 +1147,7 @@ class App:
                  "out": self.vars["out"].get().strip(),
                  "as_of": self.vars["par.as_of"].get(), "period_from": self.vars["par.period_from"].get(),
                  "period_to": self.vars["par.period_to"].get(),
+                 "rate": _rate_text(self.vars["par.rate"].get()),
                  "moratoria": ",".join(k for k, x in self.mor_vars.items() if x.get()) or "none",
                  "doc": DOC_CHOICES.get(self.vars["par.doc"].get(), "auto"),
                  "region": self.regions.get(self.vars["par.region"].get(), "perm_krai"),

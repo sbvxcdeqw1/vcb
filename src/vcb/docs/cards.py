@@ -1,12 +1,11 @@
 """Карточка расчёта задолженности и расчёт пени (xlsx) - по образцам заказчика, оформление для печати на A4."""
 from __future__ import annotations
 
-from decimal import Decimal
 
 from openpyxl import Workbook
 
 from .. import __version__
-from ..models import CAPREPAIR, CATEGORY_TITLES, CHARGE, OPENING, PAYMENT
+from ..models import CAPREPAIR, CATEGORY_TITLES
 from ..money import fmt as money_fmt
 from .context import Case, CategoryResult
 from .xlsx_util import (LEFT, cap, MONEY, TOTAL_FILL, header_row, put, setup_print, signature_block, title_block,
@@ -21,7 +20,7 @@ def _lines(case: Case, res: CategoryResult, title: str) -> list[tuple[str, str]]
     lines = [(org, "org"), (title.upper(), "title"), (what, "center"),
              (f"за период с {res.period_from:%d.%m.%Y} по {res.period_to:%d.%m.%Y}, "
               f"по состоянию на {case.as_of:%d.%m.%Y}", "center"), ("", "gap"),
-             (f"Адрес: {case.debtor.address or (res.account or case.account).address}", "left")]
+             (f"Адрес: {case.premises.address or (res.account or case.account).address}", "left")]
     if case.debtor.fio or (res.account or case.account).owner:
         lines.append((f"Собственник: {case.debtor.fio or (res.account or case.account).owner}", "left"))
     if case.debtor.area:
