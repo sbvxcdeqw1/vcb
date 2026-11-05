@@ -97,6 +97,30 @@ def _overlap(a: date, b: date, rules: PenaltyRules, accrued: date | None = None)
     return n
 
 
+def _split_moratoria(s: date, e: date, n: int, rules: PenaltyRules, accrued: date | None):
+    """Период просрочки без дней моратория: [(с, по, дней)]. Пересечение с мораторием разрезает период, и в расчёт
+    попадают только куски вне моратория. `n` - дней периода по правилам счёта (1/300 в режиме calendar - ровно 60),
+    разница с календарной длиной относится к последнему куску."""
+    windows = sorted((m0, m1) for m0, m1, *rest in rules.moratoria
+                     if not (rest and rest[0] and accrued is not None and accrued >= rest[0]))
+    pieces, cur = [], s
+    for m0, m1 in windows:
+        if m1 < cur or m0 > e:
+            continue
+        if m0 > cur:
+            pieces.append((cur, m0 - timedelta(1)))
+        cur = max(cur, m1 + timedelta(1))
+    if cur <= e:
+        pieces.append((cur, e))
+    if not pieces:
+        return []
+    total = max(n - _overlap(s, e, rules, accrued), 0)
+    out = [(a, b, (b - a).days + 1) for a, b in pieces]
+    a, b, k = out[-1]
+    out[-1] = (a, b, k + total - sum(x[2] for x in out))
+    return [x for x in out if x[2] > 0]
+
+
 def _segments(due: date, last: date, rules: PenaltyRules) -> list[tuple[date, date, int, int]]:
     """[(с, по, дней, делитель)] для просрочки от срока `due` до последнего дня начисления `last`."""
     if rules.mode == "calendar":
@@ -140,9 +164,8 @@ def calc_penalty(lines: list[ChargeLine], as_of: date, rules: PenaltyRules, rate
             rate = rates.at(rate_day)
             segs = []
             for s, e, n, div in _join_equal(_segments(ln.due, end, rules), rules):
-                n = max(n - _overlap(s, e, rules, ln.accrued), 0)
-                if n:
-                    segs.append(Segment(s, e, n, div, rate, p.amount, p.amount * rate / div * n / 100))
+                for a, b, k in _split_moratoria(s, e, n, rules, ln.accrued):
+                    segs.append(Segment(a, b, k, div, rate, p.amount, p.amount * rate / div * k / 100))
             items.append(PenaltyItem(ln, p.amount, p.closed, segs))
     return items
 

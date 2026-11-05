@@ -572,3 +572,15 @@ def test_payment_stops_penalty_only_for_paid_sum():
     paid, rest = calc_penalty([ln], as_of, PenaltyRules(), rates)
     assert paid.base == Decimal(400) and paid.segments[-1].end == date(2024, 9, 19)
     assert rest.base == Decimal(600) and rest.segments[-1].end == as_of  # на остаток пени продолжаются
+
+
+def test_moratorium_splits_period_dates():
+    """Остаток за июнь 2020 (срок 10.07.2020): период 1/300 целиком в моратории 2020, период 1/130 разрезан."""
+    from vcb.calc.penalty import PenaltyRules, RateTable, calc_penalty
+
+    rules = PenaltyRules(moratoria=[(date(2020, 4, 1), date(2020, 12, 31), None),
+                                    (date(2022, 4, 1), date(2022, 10, 1), None)])
+    ln = _line(2020, 6, "215.53", [("215.53", None)])
+    segs = calc_penalty([ln], date(2026, 11, 5), rules, RateTable(default=Decimal("9.5")))[0].segments
+    assert [(s.period, s.days, s.divisor) for s in segs] == [
+        ("01.01.21-31.03.22", 455, 130), ("02.10.22-05.11.26", 1496, 130)]
