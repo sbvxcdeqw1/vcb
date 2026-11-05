@@ -584,3 +584,18 @@ def test_moratorium_splits_period_dates():
     segs = calc_penalty([ln], date(2026, 11, 5), rules, RateTable(default=Decimal("9.5")))[0].segments
     assert [(s.period, s.days, s.divisor) for s in segs] == [
         ("01.01.21-31.03.22", 455, 130), ("02.10.22-05.11.26", 1496, 130)]
+
+
+def test_penalty_schedule_full_sum_then_reduced():
+    """Пени по остатку: вся сумма до дня оплаты, со дня оплаты - уменьшенная сумма; итог как по частям."""
+    from vcb.calc.penalty import PenaltyRules, RateTable, calc_penalty, line_schedule
+
+    rules, as_of = PenaltyRules(), date(2025, 3, 1)
+    ln = _line(2024, 6, 1000, [(400, date(2024, 9, 20)), (600, None)])
+    items = calc_penalty([ln], as_of, rules, RateTable(default=Decimal("9.5")))
+    rows = line_schedule(ln, items, as_of, rules)
+    shown = [(r.base, r.segment.period if r.segment else None, r.pay_date) for r in rows]
+    assert shown == [(Decimal(1000), "11.08.24-19.09.24", None),
+                     (Decimal(600), "20.09.24-10.10.24", date(2024, 9, 20)),
+                     (Decimal(600), "11.10.24-01.03.25", None)]
+    assert sum(r.segment.penalty for r in rows) == sum(i.penalty for i in items)

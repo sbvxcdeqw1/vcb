@@ -172,3 +172,61 @@ def calc_penalty(lines: list[ChargeLine], as_of: date, rules: PenaltyRules, rate
 
 def total_penalty(items: list[PenaltyItem]):
     return q(sum((i.penalty for i in items), Decimal(0)))
+
+
+@dataclass
+class ScheduleRow:
+    """Строка расчёта пени по начислению: остаток долга `base` за период `segment`; оплата `pay_date`/`pay_amount`
+    уменьшает остаток с этой строки (строка без периода - оплата, после которой пени дальше не идут)."""
+
+    base: Decimal | None
+    segment: Segment | None = None
+    pay_date: date | None = None
+    pay_amount: Decimal = Decimal(0)
+
+
+def line_schedule(ln: ChargeLine, items: list[PenaltyItem], as_of: date, rules: PenaltyRules) -> list[ScheduleRow]:
+    """Пени по начислению на остаток долга во времени: сначала вся сумма за свой период, после каждой оплаты -
+    уменьшенная сумма за следующий период. Итог равен сумме пени по частям (`calc_penalty`)."""
+    mine = [it for it in items if it.line is ln]
+    if not mine:
+        return []
+    shift = timedelta(0 if rules.include_payment_day else 1)
+    ends = [(it.pay_date - shift if it.pay_date else as_of, it) for it in mine]
+    last = max(e for e, _ in ends)
+    master = [(a, b, k, div) for s, e, n, div in _join_equal(_segments(ln.due, last, rules), rules)
+              for a, b, k in _split_moratoria(s, e, n, rules, ln.accrued)]
+    breaks = sorted({e + timedelta(1) for e, it in ends if it.pay_date})
+    rows: list[ScheduleRow] = []
+    for a, b, k, div in master:
+        cuts = [a] + [d for d in breaks if a < d <= b]
+        spans = [(x, (cuts[i + 1] - timedelta(1)) if i + 1 < len(cuts) else b) for i, x in enumerate(cuts)]
+        days = [(y - x).days + 1 for x, y in spans]
+        days[-1] += k - sum(days)
+        for i in range(len(days) - 1, 0, -1):  # 60 дней ступени меньше календарных - недостающее с конца
+            if days[i] < 0:
+                days[i - 1] += days[i]
+                days[i] = 0
+        for (x, y), n in zip(spans, days):
+            if n <= 0:
+                continue
+            by_rate: dict[Decimal, Decimal] = {}
+            for e, it in ends:
+                if e >= y and it.segments:
+                    by_rate[it.segments[0].rate] = by_rate.get(it.segments[0].rate, Decimal(0)) + it.base
+            for rate, base in by_rate.items():
+                rows.append(ScheduleRow(base, Segment(x, y, n, div, rate, base, base * rate / div * n / 100)))
+    # оплаты: в строку, с которой остаток уменьшился, или отдельной строкой без периода
+    paid: dict[date, Decimal] = {}
+    for it in mine:
+        if it.pay_date:
+            paid[it.pay_date] = paid.get(it.pay_date, Decimal(0)) + it.base
+    for d in sorted(paid):
+        start = d - shift + timedelta(1)
+        row = next((r for r in rows if r.segment and r.segment.start == start and not r.pay_date), None)
+        if row:
+            row.pay_date, row.pay_amount = d, paid[d]
+        else:
+            pos = next((i for i, r in enumerate(rows) if r.segment and r.segment.start > start), len(rows))
+            rows.insert(pos, ScheduleRow(None, None, d, paid[d]))
+    return rows

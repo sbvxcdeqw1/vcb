@@ -70,37 +70,6 @@ def write_calc_card(path, case: Case, res: CategoryResult):
 write_debt_card = write_calc_card  # прежнее имя
 
 
-def _merge_items(res: CategoryResult) -> dict:
-    """Части начисления, погашенные в один день (оплаты по разным услугам), показываем одной строкой расчёта."""
-    from ..calc.penalty import PenaltyItem, Segment
-
-    out: dict[int, list] = {}
-    for it in res.penalty_items:
-        out.setdefault(id(it.line), []).append(it)
-    for key, items in out.items():
-        by_date: dict = {}
-        for it in items:
-            by_date.setdefault(it.pay_date, []).append(it)
-        merged = []
-        for pay_date, group in by_date.items():
-            if len(group) == 1:
-                merged.append(group[0])
-                continue
-            segs: dict[tuple, Segment] = {}
-            for it in group:
-                for sg in it.segments:
-                    k = (sg.start, sg.end, sg.days, sg.divisor, sg.rate)
-                    if k in segs:
-                        segs[k].base += sg.base
-                        segs[k].penalty += sg.penalty
-                    else:
-                        segs[k] = Segment(sg.start, sg.end, sg.days, sg.divisor, sg.rate, sg.base, sg.penalty)
-            merged.append(PenaltyItem(group[0].line, sum((i.base for i in group), Decimal(0)), pay_date,
-                                      list(segs.values())))
-        out[key] = merged
-    return out
-
-
 def write_penalty_card(path, case: Case, res: CategoryResult):
     """Образец: «Расчет пени по задолженности собственника жилья»."""
     wb = Workbook()
@@ -113,30 +82,30 @@ def write_penalty_card(path, case: Case, res: CategoryResult):
                          "Количество дней", "Сумма пени, руб."], height=44)
     r = hdr + 1
     first_row = r
-    items_by_line = _merge_items(res)
+    from ..calc.penalty import PenaltyRules, line_schedule
+
     for ln in res.lines:
         first = True
-        for it in items_by_line.get(id(ln), []):
-            for k, s in enumerate(it.segments or [None]):
-                put(ws, f"A{r}", ln.label if first else None, border=True, align=LEFT)
-                put(ws, f"B{r}", ln.amount if first else None, border=True, fmt=MONEY)
-                put(ws, f"C{r}", f"{ln.due:%d.%m.%Y}" if first else None, border=True, align=LEFT)
-                put(ws, f"D{r}", f"{it.pay_date:%d.%m.%Y}" if it.pay_date and k == 0 else None, border=True,
-                    align=LEFT)
-                put(ws, f"E{r}", it.base if it.pay_date and k == 0 else None, border=True, fmt=MONEY)
-                put(ws, f"I{r}", it.base, border=True, fmt=MONEY)
-                if s:
-                    put(ws, f"F{r}", s.rate, border=True, fmt="0.00")
-                    put(ws, f"G{r}", s.divisor, border=True, fmt="0")
-                    put(ws, f"H{r}", f"=F{r}/G{r}", border=True, fmt="0.0000")
-                    put(ws, f"J{r}", s.period, border=True, align=LEFT)
-                    put(ws, f"K{r}", s.days, border=True, fmt="0")
-                    put(ws, f"L{r}", f"=I{r}*H{r}*K{r}/100", border=True, fmt=MONEY)
-                else:
-                    for col in "FGHJKL":
-                        put(ws, f"{col}{r}", None, border=True)
-                first = False
-                r += 1
+        for row in line_schedule(ln, res.penalty_items, case.as_of, res.rules or PenaltyRules()):
+            s = row.segment
+            put(ws, f"A{r}", ln.label if first else None, border=True, align=LEFT)
+            put(ws, f"B{r}", ln.amount if first else None, border=True, fmt=MONEY)
+            put(ws, f"C{r}", f"{ln.due:%d.%m.%Y}" if first else None, border=True, align=LEFT)
+            put(ws, f"D{r}", f"{row.pay_date:%d.%m.%Y}" if row.pay_date else None, border=True, align=LEFT)
+            put(ws, f"E{r}", row.pay_amount if row.pay_date else None, border=True, fmt=MONEY)
+            put(ws, f"I{r}", row.base, border=True, fmt=MONEY)
+            if s:
+                put(ws, f"F{r}", s.rate, border=True, fmt="0.00")
+                put(ws, f"G{r}", s.divisor, border=True, fmt="0")
+                put(ws, f"H{r}", f"=F{r}/G{r}", border=True, fmt="0.0000")
+                put(ws, f"J{r}", s.period, border=True, align=LEFT)
+                put(ws, f"K{r}", s.days, border=True, fmt="0")
+                put(ws, f"L{r}", f"=I{r}*H{r}*K{r}/100", border=True, fmt=MONEY)
+            else:
+                for col in "FGHJKL":
+                    put(ws, f"{col}{r}", None, border=True)
+            first = False
+            r += 1
         if first:  # начисление без строк расчёта (пени ещё не начисляются)
             put(ws, f"A{r}", ln.label, border=True, align=LEFT)
             put(ws, f"B{r}", ln.amount, border=True, fmt=MONEY)

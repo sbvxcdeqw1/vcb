@@ -30,6 +30,7 @@ class CategoryResult:
     payments: list = field(default_factory=list)  # оплаты из реестра пакета (parsers.payments.Payment)
     scenarios: list = field(default_factory=list)  # (название, долг, пени) при разных решениях по оплатам
     excluded_services: list = field(default_factory=list)  # услуги, снятые оператором с расчёта
+    rules: object = None  # PenaltyRules пакета (для вывода расчёта пени по остатку долга)
 
     @property
     def total(self) -> Decimal:

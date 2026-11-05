@@ -295,6 +295,7 @@ def _process_package(case: Case, pkg: Package, acc, removed, row, cfg, as_of, pe
     res.all_lines, res.ignored = all_lines, ignored
     res.account, res.period_from, res.period_to = acc, p_from, p_to
     res.payments, res.excluded_services = pays, removed
+    res.rules = rules
     res.grid_entries = _grid_entries(entries, lines, cat)
     res.card_rows = _card_rows(entries, ignored, cat)
     if ignored:
