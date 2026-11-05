@@ -252,10 +252,8 @@ HELP = {
     "par.period_from": "Начало расчётного периода. Начисления и оплаты до этой даты не учитываются. "
                        "Пусто — с первого начисления выгрузки.",
     "par.period_to": "Конец расчётного периода. Пусто — до последнего начисления выгрузки.",
-    "par.moratoria": "Периоды, за которые пени не начисляются по постановлениям Правительства РФ. Отметьте, если "
-                     "решили применять: ПП № 424 — ковидный мораторий на пени по ЖКУ и капремонту; ПП № 497 — "
-                     "мораторий на банкротство, неустойка не идёт на долг, возникший до 01.04.2022 (применимость к "
-                     "ЖКУ и капремонту спорна).",
+    "par.moratoria": "Периоды, за которые пени не начисляются. Если просрочка пересекается с периодом, из неё "
+                     "убираются только дни внутри периода; до и после пени идут как обычно.",
     "par.doc": "Судебный приказ или исковое заявление. «Автоматически» — приказ при сумме до 500 000 ₽, иначе иск.",
     "par.region": "Регион, по справочнику судов которого определяется подсудность.",
 }
@@ -765,13 +763,13 @@ class App:
             menu.pack(fill="x")
         opts = ctk.CTkFrame(body, fg_color="transparent")
         opts.grid(row=3, column=0, columnspan=3, sticky="w", padx=6, pady=(10, 2))
-        self.mor_vars = {"covid2020": tk.BooleanVar(value=False), "pp497": tk.BooleanVar(value=False)}
+        self.mor_vars = {"covid2020": tk.BooleanVar(value=True), "pp497": tk.BooleanVar(value=True)}
         mor = ctk.CTkFrame(body, fg_color="transparent")
         mor.grid(row=2, column=0, columnspan=3, sticky="w", padx=6, pady=(12, 0))
-        self.label(mor, "Мораторные периоды (по умолчанию пени считаются без моратория)",
+        self.label(mor, "Мораторные периоды (пени за эти дни не начисляются)",
                    HELP["par.moratoria"]).pack(anchor="w")
-        for name, text in (("covid2020", "ПП № 424: 06.04.2020 – 31.12.2020"),
-                           ("pp497", "ПП № 497: 01.04.2022 – 01.10.2022, только на долг, возникший до 01.04.2022")):
+        for name, text in (("covid2020", "с 01.04.2020 по 31.12.2020"),
+                           ("pp497", "с 01.04.2022 по 01.10.2022")):
             ctk.CTkCheckBox(mor, text=text, variable=self.mor_vars[name], corner_radius=6, checkmark_color="#ffffff",
                             fg_color=COLORS["accent"], border_color=COLORS["line"]).pack(anchor="w", pady=2)
         self.claim_var = tk.BooleanVar(value=True)

@@ -177,11 +177,11 @@ def test_rate_cap_and_history():
     rules, rates = rules_from(load_config())
     assert rates.at(date(2026, 4, 13)) == Decimal("9.5")  # ключевая выше, но действует потолок 9,5%
     assert rates.at(date(2021, 6, 1)) == Decimal("5.00")  # до потолка - фактическая ставка ЦБ
-    assert rules.moratoria == []  # мораторные периоды по умолчанию не применяются
+    assert rules.moratoria == [(date(2020, 4, 1), date(2020, 12, 31), None),
+                               (date(2022, 4, 1), date(2022, 10, 1), None)]  # по умолчанию применяются оба
     cfg = load_config()
-    cfg["penalty"]["moratoria_enabled"] = ["covid2020", "pp497"]
-    assert [(a, b, c) for a, b, c in rules_from(cfg)[0].moratoria] == [
-        (date(2020, 4, 6), date(2020, 12, 31), None), (date(2022, 4, 1), date(2022, 10, 1), date(2022, 4, 1))]
+    cfg["penalty"]["moratoria_enabled"] = []
+    assert rules_from(cfg)[0].moratoria == []
 
 
 @pytest.mark.skipif(not SAMPLE.exists(), reason="нет примера выгрузки")
@@ -542,20 +542,33 @@ def test_autofill_from_files(tmp_path):
     assert any("реестра" in n for n in notes)
 
 
-def test_moratorium_pp497_only_for_debt_before_start():
+def _line(year, month, amount, portions):
     from vcb.calc.ledger import ChargeLine, Portion
+
+    nxt = (year + (month == 12), month % 12 + 1)
+    ln = ChargeLine(year, month, date(year, month, 28), date(nxt[0], nxt[1], 10), Decimal(amount))
+    ln.portions = [Portion(Decimal(a), c) for a, c in portions]
+    return ln
+
+
+def test_moratorium_removes_only_overlapping_days():
     from vcb.calc.penalty import PenaltyRules, RateTable, calc_penalty
 
-    mor = PenaltyRules(moratoria=[(date(2022, 4, 1), date(2022, 10, 1), date(2022, 4, 1))])
-    plain = PenaltyRules()
+    mor = PenaltyRules(moratoria=[(date(2022, 4, 1), date(2022, 10, 1), None)])
     rates, as_of = RateTable(default=Decimal("9.5")), date(2023, 3, 1)
+    ln = _line(2022, 1, 1000, [(1000, None)])  # 1/300 с 11.03.2022, 1/130 с 11.05.2022
+    with_m, without = calc_penalty([ln], as_of, mor, rates)[0], calc_penalty([ln], as_of, PenaltyRules(), rates)[0]
+    removed = sum(s.days for s in without.segments) - sum(s.days for s in with_m.segments)
+    assert removed == (date(2022, 10, 1) - date(2022, 4, 1)).days + 1  # 184 дня окна
+    assert with_m.segments[0].start == without.segments[0].start and with_m.penalty > 0
 
-    def penalty(rules, year, month):
-        nxt = (year + (month == 12), month % 12 + 1)
-        ln = ChargeLine(year, month, date(year, month, 28), date(nxt[0], nxt[1], 10), Decimal(1000))
-        ln.portions = [Portion(Decimal(1000), None)]
-        return calc_penalty([ln], as_of, rules, rates)[0].penalty
 
-    # долг за январь 2022 возник до моратория - дни моратория вычитаются; за август 2022 - нет
-    assert penalty(mor, 2022, 1) < penalty(plain, 2022, 1)
-    assert penalty(mor, 2022, 8) == penalty(plain, 2022, 8)
+def test_payment_stops_penalty_only_for_paid_sum():
+    from vcb.calc.penalty import PenaltyRules, RateTable, calc_penalty
+
+    rates, as_of = RateTable(default=Decimal("9.5")), date(2025, 3, 1)
+    paid_on = date(2024, 9, 20)
+    ln = _line(2024, 6, 1000, [(400, paid_on), (600, None)])
+    paid, rest = calc_penalty([ln], as_of, PenaltyRules(), rates)
+    assert paid.base == Decimal(400) and paid.segments[-1].end == date(2024, 9, 19)
+    assert rest.base == Decimal(600) and rest.segments[-1].end == as_of  # на остаток пени продолжаются
