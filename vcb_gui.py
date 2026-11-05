@@ -99,6 +99,8 @@ def build_argv(v: dict) -> list[str]:
         d = parse_date(v.get(key, ""))
         if d:
             argv += [flag, d]
+    if v.get("moratoria"):
+        argv += ["--moratoria", v["moratoria"]]
     if v.get("doc") in ("order", "claim"):
         argv += ["--doc", v["doc"]]
     if v.get("exclude_services"):
@@ -250,6 +252,10 @@ HELP = {
     "par.period_from": "Начало расчётного периода. Начисления и оплаты до этой даты не учитываются. "
                        "Пусто — с первого начисления выгрузки.",
     "par.period_to": "Конец расчётного периода. Пусто — до последнего начисления выгрузки.",
+    "par.moratoria": "Периоды, за которые пени не начисляются по постановлениям Правительства РФ. Отметьте, если "
+                     "решили применять: ПП № 424 — ковидный мораторий на пени по ЖКУ и капремонту; ПП № 497 — "
+                     "мораторий на банкротство, неустойка не идёт на долг, возникший до 01.04.2022 (применимость к "
+                     "ЖКУ и капремонту спорна).",
     "par.doc": "Судебный приказ или исковое заявление. «Автоматически» — приказ при сумме до 500 000 ₽, иначе иск.",
     "par.region": "Регион, по справочнику судов которого определяется подсудность.",
 }
@@ -758,7 +764,16 @@ class App:
                                      button_hover_color=COLORS["accent"], dropdown_fg_color=COLORS["field"])
             menu.pack(fill="x")
         opts = ctk.CTkFrame(body, fg_color="transparent")
-        opts.grid(row=2, column=0, columnspan=3, sticky="w", padx=6, pady=(10, 2))
+        opts.grid(row=3, column=0, columnspan=3, sticky="w", padx=6, pady=(10, 2))
+        self.mor_vars = {"covid2020": tk.BooleanVar(value=False), "pp497": tk.BooleanVar(value=False)}
+        mor = ctk.CTkFrame(body, fg_color="transparent")
+        mor.grid(row=2, column=0, columnspan=3, sticky="w", padx=6, pady=(12, 0))
+        self.label(mor, "Мораторные периоды (по умолчанию пени считаются без моратория)",
+                   HELP["par.moratoria"]).pack(anchor="w")
+        for name, text in (("covid2020", "ПП № 424: 06.04.2020 – 31.12.2020"),
+                           ("pp497", "ПП № 497: 01.04.2022 – 01.10.2022, только на долг, возникший до 01.04.2022")):
+            ctk.CTkCheckBox(mor, text=text, variable=self.mor_vars[name], corner_radius=6, checkmark_color="#ffffff",
+                            fg_color=COLORS["accent"], border_color=COLORS["line"]).pack(anchor="w", pady=2)
         self.claim_var = tk.BooleanVar(value=True)
         self.alloc_var = tk.BooleanVar(value=False)
         for text, var in (("Подготовить заявление в суд (иск или судебный приказ)", self.claim_var),
@@ -766,7 +781,7 @@ class App:
             ctk.CTkCheckBox(opts, text=text, variable=var, corner_radius=6, checkmark_color="#ffffff",
                             fg_color=COLORS["accent"], border_color=COLORS["line"]).pack(anchor="w", pady=3)
         out = ctk.CTkFrame(body, fg_color="transparent")
-        out.grid(row=3, column=0, columnspan=3, sticky="ew")
+        out.grid(row=4, column=0, columnspan=3, sticky="ew")
         self.pick_row(out, "out", "Папка для готовых документов", "Выбрать папку…", "dir")
         self.vars["out"].set(str(Path.home() / "vcb_результаты"))
 
@@ -1114,6 +1129,7 @@ class App:
                  "out": self.vars["out"].get().strip(),
                  "as_of": self.vars["par.as_of"].get(), "period_from": self.vars["par.period_from"].get(),
                  "period_to": self.vars["par.period_to"].get(),
+                 "moratoria": ",".join(k for k, x in self.mor_vars.items() if x.get()) or "none",
                  "doc": DOC_CHOICES.get(self.vars["par.doc"].get(), "auto"),
                  "region": self.regions.get(self.vars["par.region"].get(), "perm_krai"),
                  "no_claim": not self.claim_var.get(), "allocation_report": self.alloc_var.get()}

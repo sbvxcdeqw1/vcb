@@ -177,7 +177,11 @@ def test_rate_cap_and_history():
     rules, rates = rules_from(load_config())
     assert rates.at(date(2026, 4, 13)) == Decimal("9.5")  # ключевая выше, но действует потолок 9,5%
     assert rates.at(date(2021, 6, 1)) == Decimal("5.00")  # до потолка - фактическая ставка ЦБ
-    assert len(rules.moratoria) == 2
+    assert rules.moratoria == []  # мораторные периоды по умолчанию не применяются
+    cfg = load_config()
+    cfg["penalty"]["moratoria_enabled"] = ["covid2020", "pp497"]
+    assert [(a, b, c) for a, b, c in rules_from(cfg)[0].moratoria] == [
+        (date(2020, 4, 6), date(2020, 12, 31), None), (date(2022, 4, 1), date(2022, 10, 1), date(2022, 4, 1))]
 
 
 @pytest.mark.skipif(not SAMPLE.exists(), reason="нет примера выгрузки")
@@ -536,3 +540,22 @@ def test_autofill_from_files(tmp_path):
     assert (values["city"], values["street"], values["house"], values["flat"]) == ("Пермь", "Тестовая", "1", "2")
     assert values["fio"] == "Иванов Иван Иванович" and values["fio_gen"] == "Иванова Ивана Ивановича"
     assert any("реестра" in n for n in notes)
+
+
+def test_moratorium_pp497_only_for_debt_before_start():
+    from vcb.calc.ledger import ChargeLine, Portion
+    from vcb.calc.penalty import PenaltyRules, RateTable, calc_penalty
+
+    mor = PenaltyRules(moratoria=[(date(2022, 4, 1), date(2022, 10, 1), date(2022, 4, 1))])
+    plain = PenaltyRules()
+    rates, as_of = RateTable(default=Decimal("9.5")), date(2023, 3, 1)
+
+    def penalty(rules, year, month):
+        nxt = (year + (month == 12), month % 12 + 1)
+        ln = ChargeLine(year, month, date(year, month, 28), date(nxt[0], nxt[1], 10), Decimal(1000))
+        ln.portions = [Portion(Decimal(1000), None)]
+        return calc_penalty([ln], as_of, rules, rates)[0].penalty
+
+    # долг за январь 2022 возник до моратория - дни моратория вычитаются; за август 2022 - нет
+    assert penalty(mor, 2022, 1) < penalty(plain, 2022, 1)
+    assert penalty(mor, 2022, 8) == penalty(plain, 2022, 8)

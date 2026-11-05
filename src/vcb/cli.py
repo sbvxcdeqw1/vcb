@@ -63,6 +63,8 @@ def run(argv):
     ap.add_argument("--config", help="свои настройки расчёта (yaml)")
     ap.add_argument("--as-of", help="дата расчёта ГГГГ-ММ-ДД (по умолчанию сегодня)")
     ap.add_argument("--period-from"), ap.add_argument("--period-to")
+    ap.add_argument("--moratoria", help="мораторные периоды без пени через запятую: covid2020 (ПП 424, 2020), "
+                                        "pp497 (ПП 497, 2022); по умолчанию не применяются")
     ap.add_argument("--payments", help="реестр оплат (файл или папка): оплаты разносятся по назначению платежа; общий реестр фильтруется по лицевому счёту")
     ap.add_argument("--payment-overrides", help="csv (;): дата;сумма;зачесть|исключить;комментарий")
     ap.add_argument("--exclude-services", help="услуги шахматки, снятые с расчёта, через «;» (например: Домофон; видеонаблюдение)")
@@ -73,6 +75,8 @@ def run(argv):
     a = ap.parse_args(argv)
 
     cfg = load_config(a.config)
+    if a.moratoria is not None:
+        cfg["penalty"]["moratoria_enabled"] = [x.strip() for x in a.moratoria.split(",") if x.strip() and x.strip() != "none"]
     if a.doc:
         cfg["court"]["doc"] = a.doc
     as_of = date.fromisoformat(a.as_of) if a.as_of else date.today()

@@ -32,6 +32,18 @@ def _d(v) -> date:
     return v if isinstance(v, date) else date.fromisoformat(str(v))
 
 
+def _moratoria(p: dict) -> list[tuple]:
+    """Включённые мораторные окна: имена из penalty.moratoria_enabled берутся из penalty.moratoria_library."""
+    lib = p.get("moratoria_library") or {}
+    out = []
+    for name in p.get("moratoria_enabled") or []:
+        if name not in lib:
+            raise ValueError(f"мораторий «{name}» не описан в penalty.moratoria_library")
+        m = lib[name]
+        out.append((_d(m["from"]), _d(m["to"]), _d(m["debt_before"]) if m.get("debt_before") else None))
+    return out
+
+
 def rules_from(cfg: dict, category: str = "services") -> tuple[PenaltyRules, RateTable]:
     """Правила пени. Для взносов на капремонт (`caprepair`) поверх общих накладываются penalty.caprepair."""
     p = dict(cfg["penalty"])
@@ -39,7 +51,7 @@ def rules_from(cfg: dict, category: str = "services") -> tuple[PenaltyRules, Rat
         p.update(cfg["penalty"].get("caprepair") or {})
     rules = PenaltyRules(mode=p["mode"], divisor1=p["divisor1"], divisor2=p["divisor2"], tier1_days=p["tier1_days"],
                          due_day=p["due_day"], include_payment_day=p["include_payment_day"],
-                         moratoria=[(_d(a), _d(b)) for a, b in p.get("moratoria") or []])
+                         moratoria=_moratoria(p))
     rates = RateTable(default=D(p["key_rate"]))
     cap = p.get("rate_cap")
     if cap:

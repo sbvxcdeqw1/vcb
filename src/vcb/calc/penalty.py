@@ -52,7 +52,9 @@ class PenaltyRules:
     grace_days: int = 30  # только для statutory
     due_day: int = 10
     include_payment_day: bool = False
-    moratoria: list[tuple[date, date]] = field(default_factory=list)  # пени не начисляются
+    # (с, по, долг_возник_до): пени за дни окна не начисляются; если задана `долг_возник_до` - только на начисления,
+    # возникшие (конец расчётного месяца) раньше этой даты
+    moratoria: list[tuple] = field(default_factory=list)
 
 
 @dataclass
@@ -84,9 +86,11 @@ class PenaltyItem:
         return sum((s.penalty for s in self.segments), Decimal(0))
 
 
-def _overlap(a: date, b: date, rules: PenaltyRules) -> int:
+def _overlap(a: date, b: date, rules: PenaltyRules, accrued: date | None = None) -> int:
     n = 0
-    for m0, m1 in rules.moratoria:
+    for m0, m1, *rest in rules.moratoria:
+        if rest and rest[0] and accrued is not None and accrued >= rest[0]:
+            continue  # долг возник после начала моратория - на него пени идут
         lo, hi = max(a, m0), min(b, m1)
         if lo <= hi:
             n += (hi - lo).days + 1
@@ -136,7 +140,7 @@ def calc_penalty(lines: list[ChargeLine], as_of: date, rules: PenaltyRules, rate
             rate = rates.at(rate_day)
             segs = []
             for s, e, n, div in _join_equal(_segments(ln.due, end, rules), rules):
-                n = max(n - _overlap(s, e, rules), 0)
+                n = max(n - _overlap(s, e, rules, ln.accrued), 0)
                 if n:
                     segs.append(Segment(s, e, n, div, rate, p.amount, p.amount * rate / div * n / 100))
             items.append(PenaltyItem(ln, p.amount, p.closed, segs))
