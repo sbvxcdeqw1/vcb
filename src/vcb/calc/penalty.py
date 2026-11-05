@@ -99,8 +99,8 @@ def _overlap(a: date, b: date, rules: PenaltyRules, accrued: date | None = None)
 
 def _split_moratoria(s: date, e: date, n: int, rules: PenaltyRules, accrued: date | None):
     """Период просрочки без дней моратория: [(с, по, дней)]. Пересечение с мораторием разрезает период, и в расчёт
-    попадают только куски вне моратория. `n` - дней периода по правилам счёта (1/300 в режиме calendar - ровно 60);
-    у разрезанного периода дни каждого куска считаются по его датам, чтобы даты и число дней совпадали."""
+    попадают только куски вне моратория. `n` - дней периода по правилам счёта (1/300 в режиме calendar - ровно 60),
+    разница с календарной длиной относится к последнему куску."""
     windows = sorted((m0, m1) for m0, m1, *rest in rules.moratoria
                      if not (rest and rest[0] and accrued is not None and accrued >= rest[0]))
     pieces, cur = [], s
@@ -114,10 +114,11 @@ def _split_moratoria(s: date, e: date, n: int, rules: PenaltyRules, accrued: dat
         pieces.append((cur, e))
     if not pieces:
         return []
-    if pieces == [(s, e)]:
-        return [(s, e, n)] if n > 0 else []  # мораторий не задел период - дни по правилам счёта
-    # период разрезан мораторием: в каждом куске - календарные дни между его датами
-    return [(a, b, (b - a).days + 1) for a, b in pieces]
+    total = max(n - _overlap(s, e, rules, accrued), 0)
+    out = [(a, b, (b - a).days + 1) for a, b in pieces]
+    a, b, k = out[-1]
+    out[-1] = (a, b, k + total - sum(x[2] for x in out))
+    return [x for x in out if x[2] > 0]
 
 
 def _segments(due: date, last: date, rules: PenaltyRules) -> list[tuple[date, date, int, int]]:

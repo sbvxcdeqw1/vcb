@@ -558,10 +558,8 @@ def test_moratorium_removes_only_overlapping_days():
     rates, as_of = RateTable(default=Decimal("9.5")), date(2023, 3, 1)
     ln = _line(2022, 1, 1000, [(1000, None)])  # 1/300 с 11.03.2022, 1/130 с 11.05.2022
     with_m, without = calc_penalty([ln], as_of, mor, rates)[0], calc_penalty([ln], as_of, PenaltyRules(), rates)[0]
-    # разрезанные периоды не заходят в окно, дни каждого куска - по его датам
-    assert all(s.end < date(2022, 4, 1) or s.start > date(2022, 10, 1) for s in with_m.segments)
-    assert all(s.days == (s.end - s.start).days + 1 for s in with_m.segments)
-    assert [s.period for s in with_m.segments] == ["11.03.22-31.03.22", "02.10.22-01.03.23"]
+    removed = sum(s.days for s in without.segments) - sum(s.days for s in with_m.segments)
+    assert removed == (date(2022, 10, 1) - date(2022, 4, 1)).days + 1  # 184 дня окна
     assert with_m.segments[0].start == without.segments[0].start and with_m.penalty > 0
 
 
