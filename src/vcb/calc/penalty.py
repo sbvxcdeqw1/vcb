@@ -52,6 +52,8 @@ class PenaltyRules:
     grace_days: int = 30  # только для statutory
     due_day: int = 10
     include_payment_day: bool = False
+    rate_on: str = "as_of"  # as_of - одна ставка на дату расчёта для всего расчёта (как в образцах заказчика);
+    #                         payment - для погашенной части ставка на день её оплаты
     # (с, по, долг_возник_до): пени за дни окна не начисляются; если задана `долг_возник_до` - только на начисления,
     # возникшие (конец расчётного месяца) раньше этой даты
     moratoria: list[tuple] = field(default_factory=list)
@@ -160,7 +162,7 @@ def calc_penalty(lines: list[ChargeLine], as_of: date, rules: PenaltyRules, rate
                 end, rate_day = as_of, as_of
             else:
                 end = p.closed if rules.include_payment_day else p.closed - timedelta(1)
-                rate_day = p.closed
+                rate_day = p.closed if rules.rate_on == "payment" else as_of
             rate = rates.at(rate_day)
             segs = []
             for s, e, n, div in _join_equal(_segments(ln.due, end, rules), rules):

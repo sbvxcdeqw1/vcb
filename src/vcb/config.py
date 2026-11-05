@@ -50,7 +50,7 @@ def rules_from(cfg: dict, category: str = "services") -> tuple[PenaltyRules, Rat
     if category == "caprepair":
         p.update(cfg["penalty"].get("caprepair") or {})
     rules = PenaltyRules(mode=p["mode"], divisor1=p["divisor1"], divisor2=p["divisor2"], tier1_days=p["tier1_days"],
-                         due_day=p["due_day"], include_payment_day=p["include_payment_day"],
+                         due_day=p["due_day"], include_payment_day=p["include_payment_day"], rate_on=p.get("rate_on", "as_of"),
                          moratoria=_moratoria(p))
     rates = RateTable(default=D(p["key_rate"]))
     cap = p.get("rate_cap")

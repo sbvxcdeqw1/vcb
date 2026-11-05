@@ -645,3 +645,19 @@ def test_file_names_have_month_address_and_surname(tmp_path):
     case = build_case(flat, {"fio": "Петров Пётр Петрович"}, prof, load_config(), date(2026, 11, 5), None)
     assert file_suffix(case) == "ноябрь_2026_Ленина_д55-1_кв98_Петров"
     assert any(n.startswith(("Заявление_на_судебный_приказ_", "Исковое_заявление_")) for n in names)
+
+
+def test_one_rate_for_whole_calculation():
+    """Часть, погашенная, когда ключевая ставка была ниже потолка, считается по той же ставке, что и остаток."""
+    from vcb.calc.penalty import PenaltyRules, calc_penalty, line_schedule
+    from vcb.config import load_config, rules_from
+
+    _, rates = rules_from(load_config())
+    as_of = date(2026, 11, 5)
+    ln = _line(2022, 11, "3977.43", [("2256.38", date(2023, 7, 20)), ("1721.05", None)])
+    items = calc_penalty([ln], as_of, PenaltyRules(), rates)
+    assert {s.rate for i in items for s in i.segments} == {Decimal("9.5")}
+    rows = line_schedule(ln, items, as_of, PenaltyRules())
+    assert [r.base for r in rows][:2] == [Decimal("3977.43"), Decimal("3977.43")]  # без раздвоения по ставкам
+    items = calc_penalty([ln], as_of, PenaltyRules(rate_on="payment"), rates)
+    assert rates.at(date(2023, 7, 20)) < Decimal("9.5") and items[0].segments[0].rate == rates.at(date(2023, 7, 20))
