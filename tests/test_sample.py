@@ -599,3 +599,22 @@ def test_penalty_schedule_full_sum_then_reduced():
                      (Decimal(600), "20.09.24-10.10.24", date(2024, 9, 20)),
                      (Decimal(600), "11.10.24-01.03.25", None)]
     assert sum(r.segment.penalty for r in rows) == sum(i.penalty for i in items)
+
+
+def test_claim_attachments_all_have_copies(tmp_path):
+    import docx
+
+    from vcb.config import load_config
+    from vcb.models import CAPREPAIR, Party
+    from vcb.pipeline import Package, build_case, write_case
+
+    g, k = two_packages(tmp_path)
+    prof = {"claimant": Party(short_name="ООО «Тест»"), "representative": Party(), "legal": {}}
+    case = build_case(g, None, prof, load_config(), date(2025, 4, 15), None, extra_packages=[Package(CAPREPAIR, k)])
+    doc = next(f for f in write_case(case, tmp_path / "out") if f.suffix == ".docx")
+    paras = [p.text.replace("\xa0", " ") for p in docx.Document(doc).paragraphs]
+    att = paras[paras.index("Приложение:") + 1:]
+    att = [t for t in att if t[:1].isdigit()]
+    assert att and all(t.endswith(" - 1 экз.") for t in att)
+    assert any("Расчёт начислений и оплат по услугам" in t for t in att)
+    assert not any("Шахматка" in t for t in att)

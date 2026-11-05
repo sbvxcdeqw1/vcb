@@ -267,19 +267,20 @@ def write_claim(path, case: Case):
     if not order:
         items.append("копия чека об отправке искового заявления ответчику")
     for cat in cats:
-        items += [f"Карточка расчетов по лицевому счету {ATT_SERVICES[cat]} - 1 экз.",
-                  f"Расчет пени {ATT_SERVICES[cat]} - 1 экз.",
-                  f"Шахматка начислений и оплат {ATT_SERVICES[cat]} - 1 экз."]
+        items += [f"Карточка расчетов по лицевому счету {ATT_SERVICES[cat]}",
+                  f"Расчет пени {ATT_SERVICES[cat]}",
+                  f"Расчёт начислений и оплат {ATT_SERVICES[cat]}"]
     items += ["Копия Устава", "Копия выписки из ЕГРЮЛ", "Копия доверенности на представителя",
               "Копия платежного поручения об уплате государственной пошлины",
               "Копия свидетельства о регистрации права / выписка из ЕГРН"]
     if CAPREPAIR in cats:
         items.append("Копия протокола общего собрания собственников о формировании фонда капитального ремонта")
     if case.legal_costs:
-        items += [f"Копия договора {_val(case.legal_contract)} - 1 экз.",
+        items += [f"Копия договора {_val(case.legal_contract)}",
                   "Копия платежного поручения об оплате юридических услуг"]
+    items = [f"{t[:1].upper() + t[1:]} - 1 экз." for t in items]  # у каждого приложения - число экземпляров
     for n, t in enumerate(items, 1):
-        _p(d, f"{n}. {t[:1].upper() + t[1:]}", indent=False, hanging=Cm(0.9), single=True, after=2, keep_next=(n == len(items)))
+        _p(d, f"{n}. {t}", indent=False, hanging=Cm(0.9), single=True, after=2, keep_next=(n == len(items)))
     who = f"Представитель {cname}" if rep.name or rep.sign_name else f"Взыскатель {cname}"
     _p(d, "", indent=False, after=6, keep_next=True)
     _signature(d, who, f"_______________ {_val(rep.sign_name or c.sign_name, '________')}")
