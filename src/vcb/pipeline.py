@@ -415,10 +415,13 @@ RU_MONTHS_FILE = ["январь", "февраль", "март", "апрель", 
 
 def file_suffix(case: Case) -> str:
     """Часть имени каждого файла: месяц и год расчёта, улица, дом, квартира и фамилия должника
-    («ноябрь_2026_Адмирала_Ушакова_д55-1_кв98_Иванов»)."""
-    d = case.debtor
+    («ноябрь_2026_Адмирала_Ушакова_д55-1_кв98_Иванов»). Адрес - квартиры, по которой долг (шапка выгрузки),
+    а не адрес должника; если в шапке адреса нет - из данных должника."""
+    d = debtor_from_account(case.account)
+    if not (d.street and d.house):
+        d = case.debtor
     street = re.sub(r"^(ул|улица)\.?\s*", "", d.street.strip(), flags=re.I)
-    surname = (d.fio or case.account.owner or "").split()
+    surname = (case.debtor.fio or case.account.owner or "").split()
     parts = [f"{RU_MONTHS_FILE[case.as_of.month - 1]} {case.as_of.year}", street,
              f"д{d.house}" if d.house else "", f"кв{d.flat}" if d.flat else "", surname[0] if surname else ""]
     text = "_".join(p for p in parts if p)

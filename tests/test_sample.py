@@ -634,8 +634,14 @@ def test_file_names_have_month_address_and_surname(tmp_path):
 
     g, _ = two_packages(tmp_path)
     prof = {"claimant": Party(short_name="ООО «Тест»"), "representative": Party(), "legal": {}}
-    case = build_case(g, {"fio": "Иванов Иван Иванович", "house": "55/1"}, prof, load_config(), date(2026, 11, 5), None)
-    assert file_suffix(case) == "ноябрь_2026_Тестовая_д55-1_кв2_Иванов"
+    # адрес должника другой - в имени файла всё равно адрес квартиры с долгом (из шапки шахматки)
+    row = {"fio": "Иванов Иван Иванович", "street": "Мира", "house": "7", "flat": "11"}
+    case = build_case(g, row, prof, load_config(), date(2026, 11, 5), None)
+    assert file_suffix(case) == "ноябрь_2026_Тестовая_д1_кв2_Иванов"
     names = sorted(f.name for f in write_case(case, tmp_path / "out"))
-    assert all(n.split(".")[0].endswith("_ноябрь_2026_Тестовая_д55-1_кв2_Иванов") for n in names), names
+    assert all(n.split(".")[0].endswith("_ноябрь_2026_Тестовая_д1_кв2_Иванов") for n in names), names
+    flat = tmp_path / "flat.xlsx"
+    make_chess(flat, "100000000002", "г.ПЕРМЬ, Ленина, д.55/1, кв. 98", {"Содержание": 100}, MONTHS_2024)
+    case = build_case(flat, {"fio": "Петров Пётр Петрович"}, prof, load_config(), date(2026, 11, 5), None)
+    assert file_suffix(case) == "ноябрь_2026_Ленина_д55-1_кв98_Петров"
     assert any(n.startswith(("Заявление_на_судебный_приказ_", "Исковое_заявление_")) for n in names)
