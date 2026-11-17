@@ -1,0 +1,419 @@
+# -*- coding: utf-8 -*-
+import re, math, html
+from data import *
+
+W, H = 1920, 1080
+esc = html.escape
+SRC_COL = {"П": "#2f6f4f", "З": "#6b3fa0", "Н": "#b8620a", "—": "#7a8594"}
+SRC_BG  = {"П": "#e3f2ea", "З": "#efe6f8", "Н": "#fdeedb", "—": "#eef0f3"}
+
+CSS = """
+@page { size: 1920px 1080px; margin:0 }
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;font-family:'Liberation Sans','DejaVu Sans',Arial,sans-serif;color:#16263d;background:#fff}
+.slide{width:1920px;height:1080px;position:relative;overflow:hidden;page-break-after:always;background:#f6f8fc;padding:34px 40px 0 40px}
+.slide h1{margin:0;font-size:38px;line-height:1.1;color:#14304f;font-weight:700}
+.slide .sub{margin-top:8px;font-size:18px;color:#5b6b80}
+.rule{height:4px;background:#d9e0ea;margin:12px 0 14px 0;border-radius:2px}
+.foot{position:absolute;left:40px;right:40px;bottom:12px;font-size:13px;color:#7a8594;display:flex;justify-content:space-between}
+.chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:12px;font-weight:700;white-space:nowrap}
+.lane{position:absolute;left:0;right:0;border-top:1px solid #cfd8e4}
+.lanelabel{position:absolute;left:0;width:176px;padding:6px 10px;font-size:15px;font-weight:700;color:#14304f;background:#e6ecf5;border-right:2px solid #b6c3d6;display:flex;align-items:center}
+.box{position:absolute;border:2px solid #2c6aa0;border-radius:10px;background:#fff;padding:17px 4px 19px 4px;font-size:12.5px;line-height:1.15;text-align:center;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.box .n{position:absolute;left:4px;top:2px;font-size:11px;font-weight:700;color:#fff;background:#2c6aa0;border-radius:8px;padding:0 5px}
+.box .dl{position:absolute;left:4px;right:4px;bottom:2px;font-size:11px;font-weight:700;border-radius:6px;padding:0 4px;line-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.box.client{border-color:#7a4fa8;background:#f4edfb}.box.client .n{background:#7a4fa8}
+.box.end{border-color:#2f7a4f;background:#e3f2ea;border-radius:22px;font-weight:700;color:#1f5a38}.box.end .n{background:#2f7a4f}
+.box.dec{border:none;background:#d98a1f;clip-path:polygon(9% 0,91% 0,100% 50%,91% 100%,9% 100%,0 50%);padding:0}
+.box.dec .in{position:absolute;inset:3px;background:#fff3de;clip-path:polygon(9% 0,91% 0,100% 50%,91% 100%,9% 100%,0 50%);display:flex;align-items:center;justify-content:center;padding:4px 16px;font-weight:700;color:#7a470a;font-size:12.5px;line-height:1.15}
+.elabel{position:absolute;transform:translate(-50%,-50%);background:#f6f8fc;font-size:12px;font-weight:700;color:#8a4b00;padding:0 4px;border-radius:5px;white-space:nowrap}
+table.t{border-collapse:collapse;width:100%;font-size:15px;background:#fff}
+table.t th{background:#14304f;color:#fff;text-align:left;padding:7px 9px;font-size:14px}
+table.t td{border:1px solid #cdd6e2;padding:6px 9px;vertical-align:top;line-height:1.25}
+table.t tr:nth-child(even) td{background:#f4f7fb}
+.card{background:#fff;border:2px solid #2c6aa0;border-radius:12px;padding:10px 14px;font-size:15px;line-height:1.3}
+.card h3{margin:0 0 5px 0;font-size:17px;color:#14304f}
+.legend{position:absolute;left:40px;right:40px;bottom:36px;font-size:14px;color:#44566d;display:flex;gap:22px;align-items:center}
+.sw{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px}
+"""
+
+def lane_name(k): return LANES[k]
+
+def short_dl(dl, src):
+    if not dl or dl == "—": return ""
+    m = re.search(r"(\d+)\s*р\.д\.", dl)
+    if m and not dl.lower().startswith(("срок задаёт","срок указан")):
+        t = f"{m.group(1)} р.д."
+    elif dl.lower().startswith("постоянно"): t = "постоянно"
+    elif dl.lower().startswith("ежеквартально"): t = "ежеквартально"
+    elif src == "З": t = "срок по закону"
+    elif dl.lower().startswith(("до ","не позднее","в назнач","по срок","по граф","по учёт","срок")): t = "по сроку"
+    else: t = ""
+    return t
+
+# ------------------------------------------------------------------ swimlane
+def diagram(p):
+    lanes = p["lanes"]; steps = p["steps"]
+    nl = len(lanes)
+    # columns
+    col = {}; last = 0
+    for s in steps:
+        c = s["c"] if s["c"] else last + 1
+        col[s["id"]] = c; last = c
+    ncols = max(col.values())
+    X0, LW = 0, 176
+    area_w = W - 80
+    top = 0
+    avail_h = 800
+    lh = min(150, avail_h // nl)
+    left = LW + 8
+    colw = (area_w - left) / ncols
+    gap = 18
+    bh = min(lh - 22, 118)
+    byid = {}
+    for s in steps:
+        li = lanes.index(s["lane"]); ci = col[s["id"]]
+        x = left + (ci - 1) * colw + gap / 2; w = colw - gap
+        y = li * lh + (lh - bh) / 2
+        byid[s["id"]] = dict(x=x, y=y, w=w, h=bh, s=s, ci=ci, li=li)
+    out = [f'<div style="position:relative;width:{area_w}px;height:{nl*lh+70}px">']
+    for i, l in enumerate(lanes):
+        out.append(f'<div class="lane" style="top:{i*lh}px;height:{lh}px;background:{"#ffffff" if i%2==0 else "#f1f5fa"}"></div>')
+        out.append(f'<div class="lanelabel" style="top:{i*lh}px;height:{lh}px">{esc(lane_name(l))}</div>')
+    # edges
+    edges = []
+    seen = set()
+    skip = set(p.get("seq_skip", []))
+    for e in p.get("edges", []):
+        a, b = e[0], e[1]; lab = e[2] if len(e) > 2 else None; sty = e[3] if len(e) > 3 else None
+        if lab == "dash": lab, sty = None, "dash"
+        edges.append((a, b, lab, sty)); seen.add((a, b))
+    if p.get("auto", True):
+        for i in range(len(steps) - 1):
+            a, b = steps[i]["id"], steps[i + 1]["id"]
+            if (a, b) in seen or (a, b) in skip: continue
+            if steps[i]["kind"] == "end": continue
+            edges.append((a, b, None, None)); seen.add((a, b))
+    svg = [f'<svg width="{area_w}" height="{nl*lh+70}" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg">',
+           '<defs><marker id="ar" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#52647c"/></marker>'
+           '<marker id="ar2" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#b8620a"/></marker></defs>']
+    labels = []
+    loopn = 0
+    bottom = nl * lh
+    for a, b, lab, sty in edges:
+        A, B = byid[a], byid[b]
+        ax, ay = A["x"] + A["w"], A["y"] + A["h"] / 2
+        bx, by = B["x"], B["y"] + B["h"] / 2
+        acx, bcx = A["x"] + A["w"] / 2, B["x"] + B["w"] / 2
+        color, mk = "#52647c", "ar"
+        dash = ""
+        if sty in ("loop",) or B["ci"] < A["ci"]:
+            cy = bottom + 16 + 15 * loopn; loopn += 1
+            pts = [(acx, A["y"] + A["h"]), (acx, cy), (bcx, cy), (bcx, B["y"] + B["h"])]
+            color, mk, dash = "#b8620a", "ar2", ' stroke-dasharray="6 4"'
+            lp = ((acx + bcx) / 2, cy)
+        elif sty == "dr":
+            pts = [(acx, A["y"] + A["h"]), (acx, by), (bx, by)]
+            lp = (acx, (A["y"] + A["h"] + by) / 2)
+            lp = (acx, A["y"] + A["h"] + 12)
+        elif A["ci"] == B["ci"]:
+            if B["li"] > A["li"]: pts = [(acx, A["y"] + A["h"]), (acx, B["y"])]
+            else: pts = [(acx, A["y"]), (acx, B["y"] + B["h"])]
+            lp = (acx + 0, (pts[0][1] + pts[1][1]) / 2)
+        else:
+            if abs(ay - by) < 1: pts = [(ax, ay), (bx, by)]; lp = ((ax + bx) / 2, ay - 11)
+            else:
+                vx = bx - gap / 2
+                pts = [(ax, ay), (vx, ay), (vx, by), (bx, by)]
+                if vx - ax > 60: lp = ((ax + vx) / 2, ay - 11)
+                else:
+                    y1, y2 = sorted((ay, by))
+                    bounds = [k * lh for k in range(nl + 1) if y1 < k * lh < y2]
+                    mid = (y1 + y2) / 2
+                    ly = min(bounds, key=lambda v: abs(v - mid)) if bounds else mid
+                    lp = (vx, ly)
+        if sty == "dash": dash = ' stroke-dasharray="4 4"'; color = "#7a8594"
+        d = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in pts)
+        svg.append(f'<path d="{d}" fill="none" stroke="{color}" stroke-width="2"{dash} marker-end="url(#{mk})"/>')
+        if lab: labels.append(f'<div class="elabel" style="left:{lp[0]:.0f}px;top:{lp[1]:.0f}px">{esc(lab)}</div>')
+    svg.append("</svg>")
+    out.append("".join(svg))
+    for sid, r in byid.items():
+        s = r["s"]
+        st = f'left:{r["x"]:.0f}px;top:{r["y"]:.0f}px;width:{r["w"]:.0f}px;height:{r["h"]:.0f}px'
+        if s["kind"] == "decision":
+            out.append(f'<div class="box dec" style="{st}"><div class="in">{esc(s["title"])}</div></div>')
+        elif s["kind"] == "end":
+            out.append(f'<div class="box end" style="{st};padding:4px"><span class="n">{esc(s["id"])}</span>{esc(s["title"].replace("ФИНИШ: ","ФИНИШ: "))}</div>')
+        else:
+            cls = "box client" if s["lane"] == "client" else "box"
+            sd = short_dl(s["dl"], s["src"])
+            chip = f'<span class="dl" style="background:{SRC_BG[s["src"]]};color:{SRC_COL[s["src"]]}">{esc(sd)}</span>' if sd else ""
+            out.append(f'<div class="{cls}" style="{st}"><span class="n">{esc(s["id"])}</span><span>{esc(s["title"])}</span>{chip}</div>')
+    out.extend(labels)
+    out.append("</div>")
+    return "".join(out)
+
+def legend():
+    return ('<div class="legend">'
+            '<span><span class="sw" style="background:#fff;border:2px solid #2c6aa0"></span>шаг</span>'
+            '<span><span class="sw" style="background:#fff3de;border:2px solid #d98a1f"></span>решение</span>'
+            '<span><span class="sw" style="background:#e3f2ea;border:2px solid #2f7a4f"></span>финиш</span>'
+            '<span><span class="sw" style="background:#f4edfb;border:2px solid #7a4fa8"></span>действие клиента</span>'
+            '<span style="color:#b8620a">- - ► возврат / повторный запрос</span>'
+            '<span>Срок на шаге: <span class="chip" style="background:#e3f2ea;color:#2f6f4f">П</span> из презентации &nbsp;'
+            '<span class="chip" style="background:#efe6f8;color:#6b3fa0">З</span> по закону РФ &nbsp;'
+            '<span class="chip" style="background:#fdeedb;color:#b8620a">Н</span> предложено, требует утверждения</span>'
+            '</div>')
+
+# ------------------------------------------------------------------ helpers
+pageno = [0]
+def slide(title, sub, body, extra=""):
+    pageno[0] += 1
+    return (f'<section class="slide"><h1>{title}</h1><div class="sub">{sub}</div><div class="rule"></div>{body}{extra}'
+            f'<div class="foot"><span>Рабочая версия 17.11.2026 · формы документов не утверждены · сроки «Н» — предложения до утверждения</span><span>{pageno[0]}</span></div></section>')
+
+def chip(src): return f'<span class="chip" style="background:{SRC_BG[src]};color:{SRC_COL[src]}">{src}</span>'
+
+def ul(items, sep="; "):
+    return esc(sep.join(items)) if items else "—"
+
+def est_lines(txt, width_chars): return max(1, math.ceil(len(txt) / width_chars))
+
+def note(s):
+    return f'<div style="color:#5b6b80;font-size:13px;margin-top:3px">{esc(s["act"])}</div>' if s['act'] != s['title'] else ''
+
+def proc_table_pages(p):
+    rows = p["steps"]
+    pages = []; cur = []; h = 0
+    limit_first = 700; limit = 880
+    def rh(s):
+        n = max(est_lines(s["title"], 52) + (est_lines(s["act"], 60) if s["act"] != s["title"] else 0), est_lines("; ".join(s["inp"]) or "—", 30), est_lines("; ".join(s["out"]) or "—", 30), est_lines(s["dl"] or "—", 24), 1)
+        return n * 19 + 16
+    for s in rows:
+        r = rh(s)
+        lim = limit_first if not pages else limit
+        if h + r > lim and cur:
+            pages.append(cur); cur = []; h = 0
+        cur.append(s); h += r
+    if cur: pages.append(cur)
+    return pages
+
+def proc_inputs_outputs(p):
+    produced = set(); ins = []; outs = []
+    for s in p["steps"]:
+        for d in s["out"]:
+            if d not in outs: outs.append(d)
+    pr = set(outs)
+    for s in p["steps"]:
+        for d in s["inp"]:
+            if d not in pr and d not in ins: ins.append(d)
+    return ins, outs
+
+def process_slides(p):
+    res = []
+    dg = diagram(p)
+    sub = f'Старт: {esc(p["start"])} → Финиш: {esc(p["finish"])}'
+    res.append(slide(f'{p["id"]}. {esc(p["name"])}', sub, dg, legend()))
+    pages = proc_table_pages(p)
+    ins, outs = proc_inputs_outputs(p)
+    for i, pg in enumerate(pages):
+        strip = ""
+        if i == 0:
+            strip = ('<div style="display:flex;gap:16px;margin-bottom:12px">'
+                     f'<div class="card" style="flex:1;border-color:#7a4fa8"><h3>Для начала процесса требуется</h3>{esc("; ".join(ins)) if ins else "Достаточно факта старта (см. выше); входных документов за пределами процесса нет"}</div>'
+                     f'<div class="card" style="flex:1.3;border-color:#2f7a4f"><h3>Продукты процесса (документы и результаты)</h3>{esc("; ".join(outs)) if outs else "—"}</div></div>')
+        trs = ""
+        for s in pg:
+            trs += (f'<tr><td><b>{esc(s["id"])}</b></td><td>{esc(lane_name(s["lane"]))}</td><td>{esc(s["title"])}{note(s)}</td>'
+                    f'<td>{ul(s["inp"])}</td><td>{ul(s["out"])}</td><td>{esc(s["dl"] or "—")}</td><td>{chip(s["src"])}</td></tr>')
+        tb = (f'{strip}<table class="t"><tr><th style="width:56px">Шаг</th><th style="width:190px">Роль</th><th>Действие</th>'
+              f'<th style="width:300px">Вход (что нужно)</th><th style="width:300px">Выход (продукт)</th><th style="width:230px">Срок</th><th style="width:44px">Ист.</th></tr>{trs}</table>')
+        suffix = f' (стр. {i+1}/{len(pages)})' if len(pages) > 1 else ''
+        res.append(slide(f'{p["id"]}. Входы, действия, продукты и сроки{suffix}', esc(p["name"]), tb))
+    return res
+
+# ------------------------------------------------------------------ static slides
+def cover():
+    groups = {}
+    for p in P: groups.setdefault(p["group"], []).append(p)
+    cols = ""
+    for g, ps in groups.items():
+        li = "".join(f'<div style="margin:3px 0"><b>{esc(p["id"])}</b> {esc(p["name"])}</div>' for p in ps)
+        cols += f'<div class="card" style="flex:1"><h3>{esc(g)}</h3>{li}</div>'
+    body = ('<div style="font-size:22px;margin:14px 0 22px 0;color:#2b3f58">Оргструктура · сквозные бизнес-процессы · регламентные сроки · входные документы и продукты процессов</div>'
+            f'<div style="display:flex;gap:16px;align-items:stretch">{cols}</div>'
+            '<div style="display:flex;gap:16px;margin-top:20px">'
+            '<div class="card" style="flex:1"><h3>Состав пакета</h3>1. Карта процессов и оргструктура<br>2. Роли и полномочия<br>3. Сквозные процессы: схема (swimlane) + таблица «вход → действие → продукт → срок»<br>4. Регламентные сроки: из презентации, по закону РФ, предложенные<br>5. Реестр документов (входы и продукты)<br>6. Допущения и открытые вопросы<br>Дополнительно: Excel-матрица с теми же данными</div>'
+            '<div class="card" style="flex:1"><h3>Условные обозначения</h3>Роли в схемах: Руководитель направления, Начальник отдела, Специалист (1 / 2 категории, ведущий).<br>'
+            f'Источник срока: {chip("П")} согласовано в презентации · {chip("З")} законодательство РФ · {chip("Н")} предложено, требует утверждения.<br>р.д. — рабочие дни по производственному календарю РФ.</div>'
+            '<div class="card" style="flex:1;border-color:#b8620a"><h3>Важно</h3>Юридическое направление, продажи и технический отдел показаны только в объёме, согласованном в презентации; их внутренние процессы не домысливались. Формы и шаблоны документов не утверждены и будут разработаны отдельно. Чек-листы и должностные инструкции — следующий этап.</div></div>')
+    return slide("Документация бизнес-процессов бухгалтерской организации", "Рабочая версия на основе согласованной модели · 17.11.2026", body)
+
+def procmap():
+    def box(t, items, color="#2c6aa0", flex=1, dashed=False):
+        li = "".join(f'<div style="margin:3px 0">{i}</div>' for i in items)
+        return f'<div class="card" style="flex:{flex};border-color:{color};{"border-style:dashed;" if dashed else ""}"><h3 style="color:{color}">{t}</h3>{li}</div>'
+    stages = [("1. Приём","П1"),("2. Запуск","П1"),("3. Обслуживание","П2, П10–П12"),("4. Изменения","П3, П4"),("5. Завершение","П4")]
+    st = "".join(f'<div class="card" style="flex:1;text-align:center;border-color:#7a4fa8"><h3 style="color:#7a4fa8">{a}</h3>{b}</div>' + ('<div style="align-self:center;font-size:30px;color:#52647c;padding:0 6px">►</div>' if i < 4 else '') for i,(a,b) in enumerate(stages))
+    nm = lambda i: next(f'<b>{p["id"]}</b> {esc(p["name"])}' for p in P if p["id"]==i)
+    body = ('<div style="font-size:18px;font-weight:700;color:#14304f;margin-bottom:6px">СКВОЗНОЙ ЖИЗНЕННЫЙ ЦИКЛ КЛИЕНТА</div>'
+            f'<div style="display:flex;gap:6px;margin-bottom:18px">{st}</div>'
+            '<div style="display:flex;gap:16px;margin-bottom:16px">'
+            + box("Сквозные клиентские процессы", [nm("П1"), nm("П2"), nm("П3"), nm("П4")], "#7a4fa8")
+            + box("Внутреннее взаимодействие", [nm("П5"), nm("П5а"), nm("П5б")], "#2c6aa0")
+            + box("Операционные процессы направлений", [nm("П10"), nm("П11"), nm("П12")], "#2f7a4f") + '</div>'
+            '<div style="display:flex;gap:16px;margin-bottom:16px">'
+            + box("Единый контур качества", [nm("П6"), nm("П7"), nm("П8")], "#b8620a")
+            + box("Управление персоналом", [nm("П9"), "Обучение, нагрузка, корректировка процессов — через П8 (решения директора)"], "#5b6b80")
+            + box("Обеспечивающие направления (не проработаны)", ["Продажи — точки входа и изменений клиента (П1, П3, П4)", "Техотдел — ПО, доступы, интеграции, резервные копии", "Юридическое — услуга по договору; получает данные о задолженности от РЦ", "<i>Внутренние процессы — отдельный этап проработки</i>"], "#7a8594", 1.3, True) + '</div>'
+            '<div class="card" style="border-color:#7a4fa8;font-size:16px"><b>Координатор комплексного клиента</b> — не отдельное подразделение: специалист направления с наивысшим приоритетом заказанных услуг (бухгалтерия → РЦ → ГИС ЖКХ → юристы), назначается руководителем этого направления. Единый контакт клиента, принимает претензии и отзывы, контролирует общий срок.</div>')
+    return slide("Карта процессов", "Как процессы связаны с жизненным циклом клиента и контурами управления", body)
+
+def orgchart():
+    def role(t, s="", dashed=False, col="#2c6aa0", bg="#fff"):
+        return f'<div class="card" style="border-color:{col};background:{bg};{"border-style:dashed;" if dashed else ""}padding:8px 10px;font-size:14px;text-align:center"><b style="color:{col};font-size:15px">{t}</b><br>{s}</div>'
+    def dept(title, note=""):
+        return ('<div style="border:2px solid #2c6aa0;border-radius:10px;background:#fff;padding:6px;margin-top:8px">'
+                f'<div style="text-align:center;font-weight:700;color:#14304f;font-size:14px">{title}</div>'
+                '<div class="card" style="margin-top:5px;padding:5px;font-size:13px;text-align:center;border-color:#9bb3cf">Начальник отдела<br>«…»</div>'
+                '<div class="card" style="margin-top:5px;padding:5px;font-size:13px;text-align:center;border-color:#2f7a4f;background:#e3f2ea">Специалисты:<br>ведущий / 1 категории / 2 категории</div>'
+                f'{note}</div>')
+    dirs = [
+      ("Бухгалтерия","Руководитель бухгалтерии<br>(Главный бухгалтер)","#2c6aa0",False),
+      ("Расчётный центр","Руководитель РЦ","#2c6aa0",False),
+      ("ГИС ЖКХ","Руководитель направления ГИС ЖКХ","#2c6aa0",False),
+      ("Юридическое","Руководитель юридического направления","#5b6b80",True),
+      ("Продажи","Руководитель / ответственное лицо продаж","#7a4fa8",True),
+      ("Техническое","Руководитель / ответственное лицо техподдержки","#5b6b80",True)]
+    cells = ""
+    for i,(n,r,c,d) in enumerate(dirs):
+        if n == "Бухгалтерия":
+            inner = role(n, r, False, c, "#dbe9f7") + '<div style="display:flex;gap:6px">' + '<div style="flex:1">'+dept("Отдел ЖКХ")+'</div><div style="flex:1">'+dept("Отдел коммерческих клиентов")+'</div></div>'
+            cells += f'<div style="flex:2.1;border:2px solid #2c6aa0;border-radius:14px;padding:8px;background:#eef4fb">{inner}</div>'
+        else:
+            if n in ("Расчётный центр","ГИС ЖКХ"):
+                body = dept("Отделы", '<div style="font-size:12px;color:#5b6b80;text-align:center;margin-top:4px">число отделов определяется после оценки нагрузки</div>')
+            else:
+                body = ('<div style="border:2px dashed #9aa6b6;border-radius:10px;padding:8px;margin-top:8px;text-align:center;font-size:13px;color:#5b6b80;background:#fff">Структура уточняется<br>Начальник отдела «…» / Специалисты</div>')
+            cells += f'<div style="flex:1;border:2px {"dashed" if d else "solid"} {c};border-radius:14px;padding:8px;background:{"#f3f5f8" if d else "#eef4fb"}">{role(n, r, False, c, "#ffffff")}{body}</div>'
+    body = ('<div style="display:flex;flex-direction:column;align-items:center;gap:6px">'
+            '<div style="background:#14304f;color:#fff;border-radius:40px;padding:8px 60px;font-weight:700;font-size:18px">СОБСТВЕННИКИ <span style="font-weight:400;font-size:14px">— стратегическое управление</span></div>'
+            '<div style="width:3px;height:14px;background:#52647c"></div>'
+            '<div style="background:#14304f;color:#fff;border-radius:10px;padding:8px 40px;text-align:center"><b style="font-size:19px">ДИРЕКТОР</b><br><span style="font-size:14px">общие правила · KPI-принципы · ресурсы · кадровые решения · проверки</span></div>'
+            '<div style="width:3px;height:14px;background:#52647c"></div></div>'
+            '<div style="border-top:3px solid #52647c;margin:0 4% 8px 4%"></div>'
+            f'<div style="display:flex;gap:12px;align-items:flex-start">{cells}</div>'
+            '<div style="display:flex;gap:14px;margin-top:14px">'
+            '<div class="card" style="flex:1.2;border-color:#5b6b80"><h3>Именование должностей в схемах и документах</h3>Руководитель &lt;наименование направления&gt; · Начальник отдела &lt;наименование отдела&gt; · Специалист &lt;ведущий / 1 категории / 2 категории&gt;. Численность отделов определяется после оценки нагрузки и здесь не фиксируется. Пунктир — структура не определена.</div>'
+            '<div class="card" style="flex:1;border-color:#7a4fa8"><h3>Координатор комплексного клиента</h3>Не подразделение, а роль: специалист направления с наивысшим приоритетом услуг (бухгалтерия → РЦ → ГИС → юристы); назначает руководитель этого направления.</div>'
+            '<div class="card" style="flex:1;border-color:#b8620a"><h3>Сквозные контуры</h3>Общие процессы взаимодействия · единый контур качества · управление персоналом (дисциплина, нагрузка, обучение) — действуют во всех направлениях.</div></div>')
+    return slide("Оргструктура и управленческие роли", "Собственники → Директор → руководители направлений → начальники отделов → специалисты", body)
+
+def roles():
+    rows = [
+     ("Директор","Общие принципы и правила, KPI-принципы, ресурсы и кадровые решения; вправе проверить любое направление без графика; окончательные решения по серьёзным дисциплинарным мерам и увольнению; подключается к критическим претензиям и неурегулированным разногласиям","Решение по разногласию; решение по претензии; квартальная сводка; решения по увольнению; решения по KPI","2 р.д. (с руководителями); совещание раз в 2 недели"),
+     ("Руководитель направления","Методология, общий контроль, ресурсы, эскалации; назначает координатора и ответственных за ошибки; готовит ответы по претензиям; выборочные проверки; предлагает директору взыскание/увольнение","Подтверждение готовности направления; назначение ответственного за ошибку; план корректирующих мер; результаты проверок","2 р.д. (между руководителями)"),
+     ("Начальник отдела","Текущая организация и контроль работы, назначает специалистов и задачи, классифицирует ошибки и претензии, первичный контроль дисциплины, подтверждает готовность отдела","Назначение специалиста и задач; категория ошибки; подтверждение готовности отдела; меры по дисциплине","1 р.д. внутри отдела"),
+     ("Специалист (ведущий / 1 / 2 категории)","Исполнение услуг по закреплённым клиентам; запросы и ответы по своей зоне; регистрация выявленных ошибок; исправление допущенных ошибок","Результаты услуг; запросы и ответы; записи об ошибках","1 р.д. / 2 р.д. / 3 р.д. по адресату"),
+     ("Координатор комплексного клиента","Единый контакт клиента: объединяет запросы, распределяет материалы, согласует дату запуска, регистрирует претензии и отзывы, контролирует общий договорный срок","Сводный запрос; пакет материалов; согласованная дата запуска; записи о претензиях и отзывах","1 р.д. подтверждение; 3 р.д. с клиентом"),
+     ("Клиент","Предоставляет исходные документы и принимает хозяйственные решения","Первичные документы; решения клиента","Срок указывается в запросе"),
+    ]
+    trs = "".join(f'<tr><td><b>{esc(a)}</b></td><td>{esc(b)}</td><td>{esc(c)}</td><td>{esc(d)}</td></tr>' for a,b,c,d in rows)
+    tb = f'<table class="t" style="font-size:16px"><tr><th style="width:250px">Роль</th><th>Зона ответственности и полномочия</th><th style="width:420px">Типовые документы-решения</th><th style="width:260px">Ключевые сроки</th></tr>{trs}</table>'
+    return slide("Роли и полномочия (основа для должностных инструкций)", "Только согласованные полномочия; детализация — на этапе должностных инструкций", tb)
+
+def backoffice():
+    cards = [
+     ("Продажи","#7a4fa8",["Первичная передача сведений о клиенте и составе услуг (П1)","Общая координация начального приёма","Оформление изменения состава услуг (П3)","Оформление прекращения услуги/договора (П4)","Участие в оценке/организации дополнительных услуг"],["Договор; перечень услуг; карточка клиента; изменение договора; соглашение о прекращении"],["Внутренний цикл продажи и заключения договора; формы и сроки"]),
+     ("Технический отдел","#5b6b80",["Диагностика и исправление проблем ПО компании","Передача подрядчику при необходимости","Резервное копирование и восстановление","Поддержка доступов, интеграций и загрузок для ГИС","Реализация технических требований направлений"],["Функциональные требования направлений; обращения РЦ и ГИС"],["Состав технических заявок и учёта инцидентов; формы и сроки"]),
+     ("Юридическое направление","#5b6b80",["Входит в оргструктуру, оказывает услуги по договору","Участвует в очерёдности назначения координатора","Получает данные о задолженности от РЦ"],["Данные о задолженности от РЦ; договор"],["Функциональные операции, входы/выходы, документы и сроки — не согласованы"]),
+    ]
+    h = ""
+    for t, c, known, io, gaps in cards:
+        h += (f'<div class="card" style="flex:1;border-color:{c}"><h3 style="color:{c}">{t}</h3><b>Что известно</b><ul style="margin:4px 0 8px 18px;padding:0">' + "".join(f"<li>{esc(k)}</li>" for k in known) + f'</ul><b>Известные входы/выходы</b><br>{esc(io[0])}<div style="margin-top:8px;color:#9a2a2a"><b>Не проработано</b><br>{esc(gaps[0])}</div></div>')
+    body = f'<div style="display:flex;gap:16px">{h}</div><div class="card" style="margin-top:16px;border-color:#b8620a">Эти блоки изображены как «чёрные ящики»: в сквозных процессах показаны только согласованные точки входа и выхода. Предположений о функциях не добавлено. Следующий этап — детальная проработка функций, входов/выходов, документов и сроков этих направлений.</div>'
+    return slide("Обеспечивающие направления: продажи, технический отдел, юристы", "Показано только то, что согласовано в презентации", body)
+
+def sla_slides():
+    out = []
+    t1 = "".join(f'<tr><td>{esc(a)}</td><td><b>{esc(b)}</b></td><td>{esc(c)}</td></tr>' for a,b,c in PDF_SLAS)
+    out.append(slide("Регламентные сроки: согласованные нормативы", "Источник: презентация (р.д. — рабочие дни по производственному календарю РФ). Это сроки готовности ответа/действия, а не срок первичной реакции",
+        f'<table class="t"><tr><th>Вид взаимодействия</th><th style="width:560px">Срок</th><th style="width:220px">Процесс</th></tr>{t1}</table>'))
+    # новые
+    news = [(p, s) for p in P for s in p["steps"] if s["src"] == "Н" and s["dl"] and s["kind"] != "decision"]
+    pages = [news[i:i+17] for i in range(0, len(news), 17)]
+    for i, pg in enumerate(pages):
+        trs = "".join(f'<tr><td><b>{esc(s["id"])}</b></td><td>{esc(p["name"])}</td><td>{esc(lane_name(s["lane"]))}</td><td>{esc(s["title"])}</td><td><b>{esc(s["dl"])}</b></td></tr>' for p, s in pg)
+        out.append(slide(f'Предложенные сроки: не прописаны в документации ({i+1}/{len(pages)})', "Требуют утверждения; внутренних нормативов нет, будут разработаны позже. Сроки для клиента — рекомендации, не обязательства",
+            f'<table class="t" style="font-size:14px"><tr><th style="width:60px">Шаг</th><th style="width:380px">Процесс</th><th style="width:210px">Роль</th><th>Действие</th><th style="width:300px">Предлагаемый срок</th></tr>{trs}</table>'))
+    # закон
+    half = [LEGAL[:10], LEGAL[10:]]
+    for i, pg in enumerate(half):
+        trs = "".join(f'<tr><td><b>{esc(a)}</b></td><td>{esc(b)}</td><td>{esc(c)}</td></tr>' for a,b,c in pg)
+        out.append(slide(f'Сроки по законодательству РФ ({i+1}/2)', "Ориентиры для календаря задач; перед утверждением сверить с актуальной редакцией норм на дату применения (законодательство меняется)",
+            f'<table class="t" style="font-size:15px"><tr><th style="width:430px">Что</th><th>Срок</th><th style="width:300px">Норма</th></tr>{trs}</table>'))
+    return out
+
+STORE = {"client":("Папка клиента направления (электронный архив)","Срок договора + 3 года (ст. 196 ГК РФ)"),
+         "acc":("Папка клиента бухгалтерии; архив первички и ЭДО","Не менее 5 лет после отчётного года; годовая отчётность — по Перечню Росархива №236"),
+         "internal":("Рабочая система задач / переписка (на усмотрение руководителя)","1 год после закрытия задачи"),
+         "quality":("Реестр качества направления","3 года"),
+         "rc":("Архив РЦ по клиенту и периоду","5 лет после закрытия периода"),
+         "gis":("Архив ГИС по клиенту","5 лет"),
+         "hr":("Личное дело / служебные записки у начальника отдела","По решению руководства (уточнить по Перечню №236)")}
+CAT = {"П1":"client","П2":"acc","П3":"client","П4":"client","П5":"internal","П5а":"internal","П5б":"internal","П6":"quality","П7":"quality","П8":"quality","П9":"hr","П10":"acc","П11":"rc","П12":"gis"}
+
+def registry():
+    reg = {}
+    for p in P:
+        for s in p["steps"]:
+            for d in s["out"]:
+                r = reg.setdefault(d, dict(name=d, created=None, owner=None, cat=CAT[p["id"]], used=[]))
+                if r["created"] is None: r["created"] = s["id"]; r["owner"] = lane_name(s["lane"]); r["cat"] = CAT[p["id"]]
+            for d in s["inp"]:
+                r = reg.setdefault(d, dict(name=d, created=None, owner="Внешний вход", cat=CAT[p["id"]], used=[]))
+                r["used"].append(s["id"])
+    return list(reg.values())
+
+def registry_slides():
+    rg = registry()
+    out = []
+    pages = [rg[i:i+19] for i in range(0, len(rg), 19)]
+    for i, pg in enumerate(pages):
+        trs = ""
+        for r in pg:
+            st, ret = STORE[r["cat"]]
+            trs += (f'<tr><td><b>{esc(r["name"])}</b></td><td>{esc(r["owner"])}</td><td>{esc(r["created"] or "вне процессов")}</td>'
+                    f'<td>{esc(", ".join(dict.fromkeys(r["used"])) or "—")}</td><td>{esc(st)}</td><td>{esc(ret)}</td></tr>')
+        out.append(slide(f'Реестр документов: входы и продукты ({i+1}/{len(pages)})', "Хранение и сроки — значения по умолчанию, требуют утверждения; формы документов не утверждены — разработать",
+            f'<table class="t" style="font-size:13.5px"><tr><th style="width:360px">Документ / результат</th><th style="width:220px">Создаёт (роль)</th><th style="width:80px">Шаг</th><th style="width:230px">Нужен на шагах</th><th style="width:340px">Хранение (по умолчанию)</th><th>Срок хранения (по умолчанию)</th></tr>{trs}</table>'))
+    return out
+
+ASSUME = [
+ ("Допущение","Сквозные процессы показаны ролями, без численности и реальных наименований отделов. Должности: Руководитель <направления>, Начальник отдела <отдела>, Специалист <ведущий/1/2 категории>."),
+ ("Допущение","Координатор — роль специалиста направления с наивысшим приоритетом услуг; назначается руководителем этого направления."),
+ ("Допущение","Рабочие дни — по производственному календарю РФ. Сроки из презентации — это готовность ответа/действия."),
+ ("Допущение","Юридическое направление, продажи и техотдел показаны «чёрными ящиками»: добавлены только согласованные точки входа/выхода."),
+ ("Допущение","Сроки «Н» (предложены) введены только там, где в документации срок не определён. Эскалация по времени (просрочка → уровень) не вводилась."),
+ ("Допущение","Хранение документов и сроки — значения по умолчанию из норм РФ и практики; формы и шаблоны документов не утверждены."),
+ ("Допущение","Система задач не определена; фиксация задач, запросов и записей — на усмотрение руководителя."),
+ ("Проверить","Законные сроки приведены как ориентиры на 17.11.2026: перед утверждением регламента сверить с актуальной редакцией НК РФ, ТК РФ, ЖК РФ, 209-ФЗ и приказов."),
+ ("Открыто","Функционал юридического направления, внутренние процессы продаж и техотдела, модель заявок и инцидентов."),
+ ("Открыто","Общая система кадрового обеспечения и расчёта численности; числовые KPI; номенклатура и сроки архива."),
+ ("Открыто","Сроки по клиентским срокам (передача первички до 5 числа, согласование отчётности за 3 р.д. до сдачи) — предложены, нужны решение руководства."),
+ ("Следующий этап","Чек-листы и должностные инструкции на основе утверждённых процессов, ролей и сроков."),
+]
+def assumptions():
+    trs = "".join(f'<tr><td><b>{esc(a)}</b></td><td>{esc(b)}</td></tr>' for a,b in ASSUME)
+    return slide("Допущения, что проверить и открытые вопросы", "Что принято по умолчанию и что остаётся за руководством", f'<table class="t" style="font-size:17px"><tr><th style="width:200px">Тип</th><th>Содержание</th></tr>{trs}</table>')
+
+def main():
+    slides = [cover(), procmap(), orgchart(), roles(), backoffice()]
+    for p in P: slides.extend(process_slides(p))
+    slides.extend(sla_slides()); slides.extend(registry_slides()); slides.append(assumptions())
+    doc = f'<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Документация бизнес-процессов</title><style>{CSS}</style></head><body>{"".join(slides)}</body></html>'
+    open("../deck.html", "w", encoding="utf-8").write(doc)
+    print("slides", len(slides))
+
+if __name__ == "__main__": main()
