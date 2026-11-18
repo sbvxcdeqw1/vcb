@@ -19,7 +19,7 @@ html,body{margin:0;padding:0;font-family:'Liberation Sans','DejaVu Sans',Arial,s
 .chip{display:inline-block;padding:1px 7px;border-radius:9px;font-size:12px;font-weight:700;white-space:nowrap}
 .lane{position:absolute;left:0;right:0;border-top:1px solid #cfd8e4}
 .lanelabel{position:absolute;left:0;width:176px;padding:6px 10px;font-size:15px;font-weight:700;color:#14304f;background:#e6ecf5;border-right:2px solid #b6c3d6;display:flex;align-items:center}
-.box{position:absolute;border:2px solid #2c6aa0;border-radius:10px;background:#fff;padding:17px 4px 19px 4px;font-size:12.5px;line-height:1.15;text-align:center;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.box{position:absolute;border:2px solid #2c6aa0;border-radius:10px;background:#fff;padding:17px 4px 8px 4px;font-size:12.5px;line-height:1.15;text-align:center;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .box .n{position:absolute;left:4px;top:2px;font-size:11px;font-weight:700;color:#fff;background:#2c6aa0;border-radius:8px;padding:0 5px}
 .box .dl{position:absolute;left:4px;right:4px;bottom:2px;font-size:11px;font-weight:700;border-radius:6px;padding:0 4px;line-height:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .box.client{border-color:#7a4fa8;background:#f4edfb}.box.client .n{background:#7a4fa8}
@@ -34,6 +34,9 @@ table.t tr:nth-child(even) td{background:#f4f7fb}
 .tight td{padding:3px 8px;line-height:1.2}
 .card{background:#fff;border:2px solid #2c6aa0;border-radius:12px;padding:10px 14px;font-size:15px;line-height:1.3}
 .card h3{margin:0 0 5px 0;font-size:17px;color:#14304f}
+.scalelabel{position:absolute;left:0;width:176px;padding:2px 10px;font-size:14px;font-weight:700;color:#44566d;display:flex;align-items:center;background:#eef2f8;border-right:2px solid #b6c3d6}
+.scalebg{position:absolute;background:#eef2f8}
+.span{position:absolute;border:2px solid;border-radius:6px;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
 .legend{position:absolute;left:40px;right:40px;bottom:36px;font-size:14px;color:#44566d;display:flex;gap:22px;align-items:center}
 .sw{display:inline-block;width:14px;height:14px;border-radius:4px;vertical-align:-2px;margin-right:5px}
 """
@@ -52,6 +55,49 @@ def short_dl(dl, src):
     else: t = ""
     return t
 
+# ------------------------------------------------------------------ шкала сроков
+def _skip_dl(dl):
+    return (not dl) or dl.strip() in ("—", "-") or dl.startswith("Не определён")
+
+def build_spans(p, col):
+    """Скобки сроков: явные p['spans'] = [(метка, шаг_с, шаг_по, источник)] + подряд идущие шаги с одинаковым сроком."""
+    steps = p["steps"]; order = {s["id"]: i for i, s in enumerate(steps)}
+    out = []; covered = set()
+    for lab, a, bb, src in p.get("spans", []):
+        ids = [s["id"] for s in steps[order[a]:order[bb] + 1]]
+        covered.update(ids)
+        out.append(dict(label=lab, src=src, c1=min(col[i] for i in ids), c2=max(col[i] for i in ids)))
+    group = None
+    def flush():
+        nonlocal group
+        if group:
+            out.append(dict(label=group["label"], src=group["src"], c1=min(group["cols"]), c2=max(group["cols"])))
+        group = None
+    for s in steps:
+        if s["kind"] == "decision" or s["id"] in covered or _skip_dl(s["dl"]):
+            flush(); continue
+        key = (s["dl"], s["src"])
+        if group and group["key"] == key: group["cols"].append(col[s["id"]])
+        else:
+            flush(); group = dict(key=key, label=s["dl"], src=s["src"], cols=[col[s["id"]]])
+    flush()
+    seen = set(); uniq = []
+    for d in out:
+        k = (d["c1"], d["c2"], d["src"], short_dl(d["label"], d["src"]) or d["label"])
+        if k in seen: continue
+        seen.add(k); uniq.append(d)
+    return sorted(uniq, key=lambda d: (d["c1"], -d["c2"]))
+
+def assign_levels(spans):
+    ends = []; levels = []
+    for sp in spans:
+        for i, e in enumerate(ends):
+            if e < sp["c1"]:
+                ends[i] = sp["c2"]; levels.append(i); break
+        else:
+            ends.append(sp["c2"]); levels.append(len(ends) - 1)
+    return levels
+
 # ------------------------------------------------------------------ swimlane
 def diagram(p):
     lanes = p["lanes"]; steps = p["steps"]
@@ -62,10 +108,14 @@ def diagram(p):
         c = s["c"] if s["c"] else last + 1
         col[s["id"]] = c; last = c
     ncols = max(col.values())
+    spans = build_spans(p, col)
+    levels = assign_levels(spans)
+    SH = 26
+    so = (max(levels) + 1) * SH + 8 if spans else 0
     X0, LW = 0, 176
     area_w = W - 80
     top = 0
-    avail_h = 800
+    avail_h = 800 - so
     lh = min(150, avail_h // nl)
     left = LW + 8
     colw = (area_w - left) / ncols
@@ -75,12 +125,21 @@ def diagram(p):
     for s in steps:
         li = lanes.index(s["lane"]); ci = col[s["id"]]
         x = left + (ci - 1) * colw + gap / 2; w = colw - gap
-        y = li * lh + (lh - bh) / 2
+        y = so + li * lh + (lh - bh) / 2
         byid[s["id"]] = dict(x=x, y=y, w=w, h=bh, s=s, ci=ci, li=li)
-    out = [f'<div style="position:relative;width:{area_w}px;height:{nl*lh+70}px">']
+    out = [f'<div style="position:relative;width:{area_w}px;height:{so+nl*lh+70}px">']
     for i, l in enumerate(lanes):
-        out.append(f'<div class="lane" style="top:{i*lh}px;height:{lh}px;background:{"#ffffff" if i%2==0 else "#f1f5fa"}"></div>')
-        out.append(f'<div class="lanelabel" style="top:{i*lh}px;height:{lh}px">{esc(lane_name(l))}</div>')
+        out.append(f'<div class="lane" style="top:{so+i*lh}px;height:{lh}px;background:{"#ffffff" if i%2==0 else "#f1f5fa"}"></div>')
+        out.append(f'<div class="lanelabel" style="top:{so+i*lh}px;height:{lh}px">{esc(lane_name(l))}</div>')
+    if spans:
+        out.append(f'<div class="scalelabel" style="top:0;height:{so-6}px">Шкала сроков</div>')
+        out.append(f'<div class="scalebg" style="top:0;height:{so-6}px;left:{left-8}px;right:0"></div>')
+        for sp, lv in zip(spans, levels):
+            x1 = left + (sp["c1"] - 1) * colw + gap / 2; x2 = left + sp["c2"] * colw - gap / 2
+            sw = x2 - x1
+            lab = sp["label"] if len(sp["label"]) * 7 <= sw - 10 else (short_dl(sp["label"], sp["src"]) or sp["label"])
+            out.append(f'<div class="span" title="{esc(sp["label"])}" style="left:{x1:.0f}px;top:{lv*SH+2}px;width:{sw:.0f}px;height:{SH-5}px;'
+                       f'background:{SRC_BG[sp["src"]]};border-color:{SRC_COL[sp["src"]]};color:{SRC_COL[sp["src"]]}">{esc(lab)}</div>')
     # edges
     edges = []
     seen = set()
@@ -95,12 +154,12 @@ def diagram(p):
             if (a, b) in seen or (a, b) in skip: continue
             if steps[i]["kind"] == "end": continue
             edges.append((a, b, None, None)); seen.add((a, b))
-    svg = [f'<svg width="{area_w}" height="{nl*lh+70}" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg">',
+    svg = [f'<svg width="{area_w}" height="{so+nl*lh+70}" style="position:absolute;left:0;top:0" xmlns="http://www.w3.org/2000/svg">',
            '<defs><marker id="ar" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#52647c"/></marker>'
            '<marker id="ar2" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#b8620a"/></marker></defs>']
     labels = []
     loopn = 0
-    bottom = nl * lh
+    bottom = so + nl * lh
     for a, b, lab, sty in edges:
         A, B = byid[a], byid[b]
         ax, ay = A["x"] + A["w"], A["y"] + A["h"] / 2
@@ -134,7 +193,7 @@ def diagram(p):
                 if vx - ax > 60: lp = ((ax + vx) / 2, ay - 11)
                 else:
                     y1, y2 = sorted((ay, by))
-                    bounds = [k * lh for k in range(nl + 1) if y1 < k * lh < y2]
+                    bounds = [so + k * lh for k in range(nl + 1) if y1 < so + k * lh < y2]
                     mid = (y1 + y2) / 2
                     ly = min(bounds, key=lambda v: abs(v - mid)) if bounds else mid
                     lp = (vx, ly)
@@ -154,7 +213,7 @@ def diagram(p):
         else:
             cls = "box client" if s["lane"] == "client" else "box"
             sd = short_dl(s["dl"], s["src"])
-            chip = f'<span class="dl" style="background:{SRC_BG[s["src"]]};color:{SRC_COL[s["src"]]}">{esc(sd)}</span>' if sd else ""
+            chip = ""
             out.append(f'<div class="{cls}" style="{st}"><span class="n">{esc(s["id"])}</span><span>{esc(s["title"])}</span>{chip}</div>')
     out.extend(labels)
     out.append("</div>")
@@ -167,7 +226,7 @@ def legend():
             '<span><span class="sw" style="background:#e3f2ea;border:2px solid #2f7a4f"></span>финиш</span>'
             '<span><span class="sw" style="background:#f4edfb;border:2px solid #7a4fa8"></span>действие клиента</span>'
             '<span style="color:#b8620a">- - ► возврат / повторный запрос</span>'
-            '<span>Срок на шаге: <span class="chip" style="background:#e3f2ea;color:#2f6f4f">Пр</span> из презентации &nbsp;'
+            '<span>Шкала сроков над схемой: скобка охватывает один или несколько шагов; цвет — источник срока: <span class="chip" style="background:#e3f2ea;color:#2f6f4f">Пр</span> из презентации &nbsp;'
             '<span class="chip" style="background:#efe6f8;color:#6b3fa0">З</span> по закону РФ &nbsp;'
             '<span class="chip" style="background:#fdeedb;color:#b8620a">Н</span> предложено, требует утверждения</span>'
             '</div>')
