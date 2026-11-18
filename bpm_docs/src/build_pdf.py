@@ -45,6 +45,7 @@ def lane_name(k): return LANES[k]
 
 def short_dl(dl, src):
     if not dl or dl == "—": return ""
+    if dl.lower().startswith("вне"): return "вне 5 р.д."
     m = re.search(r"(\d+)\s*р\.д\.", dl)
     if m and not dl.lower().startswith(("срок задаёт","срок указан")):
         t = f"{m.group(1)} р.д."
@@ -63,9 +64,10 @@ def build_spans(p, col):
     """Скобки сроков: явные p['spans'] = [(метка, шаг_с, шаг_по, источник)] + подряд идущие шаги с одинаковым сроком."""
     steps = p["steps"]; order = {s["id"]: i for i, s in enumerate(steps)}
     out = []; covered = set()
-    for lab, a, bb, src in p.get("spans", []):
-        ids = [s["id"] for s in steps[order[a]:order[bb] + 1]]
-        covered.update(ids)
+    for t in p.get("spans", []):
+        lab, a, bb, src = t[:4]; o = t[4] if len(t) > 4 else {}
+        ids = [s["id"] for s in steps[order[a]:order[bb] + 1] if s["id"] not in o.get("exclude", [])]
+        if o.get("cover", True): covered.update(ids)
         out.append(dict(label=lab, src=src, c1=min(col[i] for i in ids), c2=max(col[i] for i in ids)))
     group = None
     def flush():
