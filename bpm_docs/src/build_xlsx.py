@@ -76,7 +76,7 @@ sheet(wb.create_sheet(), "Оргструктура", ["Уровень","Долж
 rows = []
 for p in P:
     for s in p["steps"]:
-        rows.append((p["id"], p["name"], s["id"], {"step":"Шаг","decision":"Решение","end":"Финиш"}[s["kind"]], LANES[s["lane"]],
+        rows.append((p["id"], p["name"], s["id"], {"step":"Шаг","decision":"Решение","end":"Финиш","ctrl":"Контроль"}[s["kind"]], LANES[s["lane"]],
                      s["title"], s["act"] if s["act"] != s["title"] else "", "; ".join(s["inp"]), "; ".join(s["out"]), s["dl"], s["src"]))
 sheet(wb.create_sheet(), "Процессы", ["Процесс","Название процесса","Шаг","Тип","Роль","Действие","Пояснение","Вход (что нужно)","Выход (продукт)","Срок","Ист. срока"], rows, [9,38,7,10,26,50,50,42,42,34,10], srccol=10)
 
